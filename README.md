@@ -135,6 +135,9 @@ js/modal.js       modal de cuenta y diálogos
 js/demo.js        pestaña DEMO, mapa de flujos y escenarios 1a–7a
 ```
 
-## Publicar en GitHub (siguiente paso)
+## Despliegue
 
-Es un sitio estático: basta con subir la carpeta `prototipo/` a un repositorio y activar **GitHub Pages**.
+- **Producción (Vercel):** https://cooltiva-prototipo.vercel.app
+- **Código (GitHub, privado):** https://github.com/stratuxtech/cooltiva-prototipo
+- Cada `git push` a `main` se despliega solo en Vercel. Es un sitio estático: no tiene build ni dependencias.
+- Para correrlo en local: `python -m http.server 5500` dentro de esta carpeta, o abrir `index.html`.

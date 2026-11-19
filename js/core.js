@@ -2,7 +2,7 @@
    NÚCLEO: estado, persistencia, router, acciones y render
    ========================================================= */
 (function () {
-  const STORE_KEY = 'cooltiva-proto-v2';
+  const STORE_KEY = 'cooltiva-proto-v3';
 
   /* ---------- Estado persistente (dominio + progreso de flujos) ----------
      empresas: todas las cuentas de clientes (las ve el panel de vendedores)

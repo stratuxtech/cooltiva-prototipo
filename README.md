@@ -15,34 +15,36 @@ Para ver cómo se ve en mobile no hay otro link: en la pestaña **DEMO → Vista
 la misma página se muestra dentro de un teléfono (360 / 390 / 430 px) y mantiene la pantalla en la que estabas.
 "Ver en escritorio" vuelve. También funciona abriéndola en un celular real.
 
-- **Mapa de flujos:** `index.html#/mapa` lista las 45 pantallas del cliente (1a … 7a) y las 16 del panel (8a … 8p).
+- **Mapa de flujos:** `index.html#/mapa` lista las 45 pantallas del cliente (1a … 7a) y las 17 del panel (8a … 8q).
   Tocar una abre ese estado con sus datos de ejemplo y desde ahí el flujo sigue siendo navegable.
 
 ## Panel de vendedores (flujo 8)
 
-Panel administrativo (más denso) para que los vendedores creen y administren cuentas de clientes.
-Ruta: `#/panel`. El demo entra con un perfil elegible: Fabiana Paz, Jorge Llorenti o un Supervisor comercial.
+Panel administrativo para que los vendedores creen y administren cuentas de clientes. Ruta: `#/panel`.
+El demo entra con un perfil elegible: Fabiana Paz, Jorge Llorenti o un Supervisor comercial.
+Está pensado para ser **rápido**: poca información por pantalla.
 
-- **Empresas:** todas las cuentas con sus usuarios agrupados por empresa; búsqueda por empresa, NIT, usuario o ciudad.
+- **Empresas:** lista mínima con el nombre de la empresa, su estado ("Alta en aprobación") y sus usuarios.
+  Tocar un usuario abre su información lista para editar; tocar la empresa abre su ficha.
 - **Ficha de empresa:** Usuarios, Datos legales, Sucursales, Recepcionistas, Crédito y contrato, Pedidos e Historial.
-  Cada dato se edita con la misma arquitectura del wizard del cliente.
-- **Nueva cuenta (wizard):** Contacto → Forma jurídica → Sucursales → Recepcionistas → Crédito y contrato → Usuarios →
-  Revisar y enviar. Con "Guardar y salir" queda en borrador.
+- **Nueva cuenta (wizard de 6 pasos):** Contacto → Forma jurídica → Sucursales → Recepcionistas → Crédito y contrato → Revisar.
+  Un solo contacto por cuenta; los demás usuarios se agregan después, desde la ficha.
+  "Siguiente" guarda lo que está escrito (no hace falta tocar "agregar") y, al haber una sucursal o un recepcionista,
+  el formulario pasa a una tarjeta "+ Agregar". "Guardar y salir" deja el alta en borrador.
 - **Crédito y contrato:** el vendedor arma las condiciones (línea, plazo, 6 documentos) y ve el contrato generado.
 - **Hacer pedido para el cliente:** abre la tienda real en *modo vendedor* (banner negro; solo Tienda y Pedidos).
   El pedido queda a nombre del vendedor y en el registro.
-- **Registro de cambios:** quién hizo qué, cuándo y en qué cuenta, filtrable; no se edita.
-- **Equipo:** alta de vendedores, que también pasa por aprobación.
+- **Registro de cambios** (quién hizo qué, cuándo y en qué cuenta; no se edita) y **Equipo** (alta de vendedores, también con aprobación).
 
 ### Control: nadie aplica un cambio solo
 
 1. El vendedor **edita en borrador**: nada se aplica a la cuenta.
-2. **Revisar y enviar:** confirmación final con cada cambio en *antes → después*, el aprobador y el motivo (obligatorio).
-3. Solo **otra persona** puede aprobar: la que envía no aparece en la lista y no ve el botón.
-4. Mientras está en aprobación, los datos involucrados quedan **bloqueados**.
-5. Al **aprobar** se aplica, se registra y (si se marcó) se muestra el **correo simulado al cliente**. Al **rechazar**,
-   el comentario es obligatorio. La persona que envía puede cancelar y sus cambios vuelven al borrador.
-6. Cada envío muestra la **notificación simulada al aprobador** (correo y WhatsApp). No se envía nada real.
+2. **Revisa y envía:** lista simple de cambios (*antes → después*). El aprobador ya viene elegido, el motivo es opcional
+   y se envía con un toque.
+3. Solo **otra persona** puede aprobar: quien envía no ve el botón. Mientras tanto, esos datos quedan **bloqueados**.
+4. **Aprobaciones:** quien aprueba ve qué se cambió y toca **Aprobar** o **Rechazar** (el rechazo pide un motivo breve).
+5. Al aprobar se aplica, queda en el registro y, si se marcó, **se avisa al cliente por correo y WhatsApp** (simulado).
+   Al enviar, también se avisa al aprobador por correo y WhatsApp (simulado). No se envía nada real.
 
 **Quién aprueba queda por definir:** hoy se elige entre los demás vendedores o un "Supervisor comercial".
 

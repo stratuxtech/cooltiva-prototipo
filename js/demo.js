@@ -142,10 +142,11 @@
       ['8i', 'Aprobar alta de cuenta (#107)', function () { pbase(); C.go('/panel/solicitud/107'); }],
       ['8j', 'Nueva cuenta · contacto', function () { pbase(); C.go('/panel/nueva/contacto'); }],
       ['8k', 'Nueva cuenta · crédito y contrato', function () { pbase(); fillNueva(4); C.go('/panel/nueva/credito'); }],
-      ['8l', 'Nueva cuenta · revisar y enviar', function () { pbase(); fillNueva(6); C.S.panel.nueva.revisor = 'jorge'; C.S.panel.nueva.nota = 'Cliente captado en visita; documentos revisados.'; C.go('/panel/nueva/revisar'); }],
+      ['8l', 'Nueva cuenta · revisar y enviar', function () { pbase(); fillNueva(5); C.S.panel.nueva.revisor = 'jorge'; C.go('/panel/nueva/revisar'); }],
       ['8m', 'Crédito solicitado por el cliente', function () { pbase(); C.go('/panel/empresa/altura/credito'); }],
       ['8n', 'Registro de cambios', function () { pbase(); C.go('/panel/registro'); }],
       ['8o', 'Equipo', function () { pbase(); C.go('/panel/equipo'); }],
+      ['8q', 'Nueva cuenta · sucursal agregada (tarjeta)', function () { pbase(); fillNueva(2); C.go('/panel/nueva/sucursales'); }],
       ['8p', 'Modo vendedor: pedido para el cliente', function () { pbase(); A.pnActAs({ dataset: { arg: 'hotel' } }); }]
     ] }
   ];
@@ -162,7 +163,6 @@
     n.sucursales = [{ id: 'ns1', dir: 'Calle Sucre 455', ciudad: 'Cochabamba', pin: { x: 44, y: 50 } }];
     n.recepcionistas = [{ id: 'nr1', nombre: 'Carlos Rocha', tel: '7455 3434', sucursalId: 'ns1' }];
     n.credito = { con: 'si', linea: '8000', plazo: '30', docs: C.fullDocs() };
-    n.usuarios = [{ id: 'nu1', nombre: 'Mario', apellido: 'Céspedes', rol: 'Encargado de compra', email: 'mario@lacasona.bo', wa: '+591 7455 1313' }];
     n.maxStep = step;
   }
   C.allScenarios = function () {

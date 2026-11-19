@@ -129,8 +129,7 @@
       contacto: { empresa: '', nombre: '', apellido: '', rol: '', email: '', wa: '' },
       fj: { tipo: '', ci: '', razon: '', nit: '', matricula: '' },
       sucursales: [], recepcionistas: [],
-      credito: { con: '', linea: '', plazo: '30', docs: C.emptyDocs() },
-      usuarios: [],
+      credito: { con: 'no', linea: '', plazo: '30', docs: C.emptyDocs() },
       revisor: '', notificar: true, nota: ''
     };
   };

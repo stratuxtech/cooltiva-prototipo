@@ -29,8 +29,10 @@ La especificación completa está en `docs/arquitectura_de_informacion_y_user_fl
   **Todo se edita, siempre en modal**; eliminar pide confirmación.
 - **Confianza con trazabilidad:** guardar aplica el cambio al instante, queda en el **Registro de cambios** con el valor
   anterior y se avisa al equipo (campana y "Nuevo"). Otro vendedor puede **revertirlo**. No hay aprobaciones previas.
-- **Crédito:** el vendedor no lo crea ni lo edita. Lo ve en modo solo lectura y puede **pedirle al cliente que lo solicite**
-  (correo y WhatsApp), porque la firma tiene que hacerse desde el dispositivo del cliente.
+- **Crédito:** el vendedor **prepara** la solicitud (carga los documentos en un modal, con "cargado por [vendedor]") y la
+  **envía al cliente para firmar** (correo y WhatsApp, sin avisos dentro de la tienda). La firma y la autorización las hace
+  siempre el cliente desde su celular o PC. Fases: Sin crédito → En preparación → Pendiente de firma → En revisión → Aprobado.
+  También puede solo **pedirle que lo haga él**.
 - **Nueva cuenta (5 pasos):** Contacto → Forma jurídica → Sucursales y recepcionistas → Crédito → Revisar y crear.
   Siempre se puede agregar otra sucursal u otro recepcionista (en modal). La cuenta queda activa al crearla.
 - **Hacer pedido para el cliente:** tienda real en *modo vendedor* (solo Tienda y Pedidos).

@@ -415,3 +415,7 @@ p.pn-entry-foot { justify-content: flex-start; }
 @media (max-width: 760px) {
   .pn-entry-t a { display: inline-block; padding: 12px 0; margin: -12px 0; }
 }
+
+/* Crédito preparado por el vendedor */
+.pn-credit-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+@media (max-width: 640px) { .pn-credit-actions .btn { flex: 1 1 100%; } }

@@ -7,8 +7,9 @@
    Lógica de confianza: el vendedor guarda y el cambio se aplica
    al instante. Se avisa al resto del equipo y queda en el
    registro; cualquier otro vendedor puede revertirlo.
-   El crédito NO lo crea el vendedor: el cliente lo solicita y
-   firma desde su dispositivo. El vendedor solo puede pedírselo.
+   Crédito: el vendedor puede cargar los documentos y enviar la
+   solicitud al cliente (correo y WhatsApp). La firma electrónica
+   y la autorización las hace siempre el cliente desde su dispositivo.
    ========================================================= */
 (function () {
   const e = C.esc;
@@ -214,12 +215,15 @@
   function docsList(docs) {
     return '<ul class="pn-docs">' + C.DOC_KEYS.map(function (k) {
       const f = (docs && docs[k]) || [];
-      return '<li class="' + (f.length ? 'is-ok' : 'is-missing') + '"><span class="pn-doc-mark" aria-hidden="true">' + C.icon(f.length ? 'check' : 'x', 13) + '</span><span><strong>' + C.DOC_LABELS[k] + '</strong><span class="muted small">' + (f.length ? e(f.map(function (x) { return x.name; }).join(', ')) : 'Falta') + '</span></span></li>';
+      const one = {}; one[k] = f;
+      const por = C.docsPor(one);
+      return '<li class="' + (f.length ? 'is-ok' : 'is-missing') + '"><span class="pn-doc-mark" aria-hidden="true">' + C.icon(f.length ? 'check' : 'x', 13) + '</span><span><strong>' + C.DOC_LABELS[k] + '</strong><span class="muted small">' +
+        (f.length ? e(f.map(function (x) { return x.name; }).join(', ')) + (por.length ? ' · cargado por ' + e(por.join(', ')) : '') : 'Falta') + '</span></span></li>';
     }).join('') + '</ul>';
   }
   function tabCredito(id, v) {
-    const c = v.credito;
-    const note = '<p class="hint mt-8">El crédito lo solicita el cliente desde su celular: sube sus documentos y firma electrónicamente. Tú no puedes crearlo por él.</p>';
+    const c = v.credito, fase = C.creditoFase(c);
+    const note = '<p class="hint mt-8">Puedes cargar sus documentos. La firma electrónica y la autorización las hace el cliente desde su celular o PC.</p>';
     if (c.estado === 'aprobado') {
       return secHead('Crédito') + '<div class="pn-credit"><section class="card card-pad"><div class="row-between"><h3 class="h3">Condiciones</h3>' + badge('Aprobado', 'ok') + '</div>' +
         '<dl class="pn-kpis"><div><dt>Línea</dt><dd>' + C.bs(c.linea) + '</dd></div><div><dt>Plazo</dt><dd>' + c.plazo + ' días</dd></div><div><dt>Disponible</dt><dd>' + C.bs(c.linea - (c.usado || 0)) + '</dd></div></dl></section>' +
@@ -229,12 +233,25 @@
     }
     if (c.estado === 'solicitado') {
       return secHead('Crédito') + '<section class="card card-pad"><div class="row-between"><h3 class="h3">Solicitud del cliente</h3>' + badge('En revisión', 'pending') + '</div>' +
-        '<p class="muted mt-8">Enviada desde su celular el ' + fmtDT(c.solicitado) + ', con firma electrónica.</p>' + docsList(c.docs) + '</section>' + note;
+        '<p class="muted mt-8">Firmada y enviada por el cliente desde su dispositivo el ' + fmtDT(c.solicitado) + '.' + (c.asistido && c.asistido.length ? ' Documentos cargados con ayuda de ' + e(joinY(c.asistido)) + '.' : '') + '</p>' + docsList(c.docs) + '</section>';
     }
-    const inv = c.invitado;
-    return secHead('Crédito') + '<section class="card card-pad pn-credit-empty"><h3 class="h3">Sin crédito</h3>' +
-      (inv ? '<p class="muted mt-8">' + C.icon('check', 14) + ' Le pedimos que lo solicite el ' + fmtDT(inv.fecha) + ' (' + e(inv.por) + '), por correo y WhatsApp.</p>' : '<p class="muted mt-8">El cliente todavía no solicitó Crédito Cooltiva.</p>') +
-      '<div class="mt-16">' + C.btn(inv ? 'Volver a pedírselo' : 'Pedir al cliente que solicite su crédito', { primary: !inv, icon: 'msg', action: 'pmOpen', arg: 'invite:x' }) + '</div></section>' + note;
+    /* Sin crédito · En preparación · Pendiente de firma */
+    const n = C.docsCount(c.docs), inv = c.invitado, env = c.enviadoFirma;
+    const BADGE = { no: ['Sin iniciar', 'neutral'], preparacion: ['En preparación', 'draft'], firma: ['Pendiente de firma', 'pending'] }[fase];
+    let msg = '', actions = '';
+    if (fase === 'firma') {
+      msg = 'Se la enviamos para firmar el ' + fmtDT(env.fecha) + ' (' + e(env.por) + '), por correo y WhatsApp. Falta que el cliente ' + (n < C.DOC_KEYS.length ? 'suba lo que falta, ' : '') + 'firme y envíe desde su dispositivo.';
+      actions = C.btn('Editar documentos', { icon: 'edit', action: 'pmOpen', arg: 'creddocs:x' }) + C.btn('Reenviar aviso', { icon: 'msg', action: 'pmOpen', arg: 'firma:x' });
+    } else if (fase === 'preparacion') {
+      msg = n + ' de ' + C.DOC_KEYS.length + ' documentos cargados. Cuando quieras, envíasela al cliente para que firme; lo que falte lo puede subir él.';
+      actions = C.btn('Enviar al cliente para firmar', { primary: true, icon: 'msg', action: 'pmOpen', arg: 'firma:x' }) + C.btn('Editar documentos', { icon: 'edit', action: 'pmOpen', arg: 'creddocs:x' });
+    } else {
+      msg = inv ? 'Le pedimos que lo solicite el ' + fmtDT(inv.fecha) + ' (' + e(inv.por) + '), por correo y WhatsApp.' : 'El cliente todavía no tiene Crédito Cooltiva. Puedes ayudarle cargando sus documentos, o pedirle que lo haga él.';
+      actions = C.btn('Cargar sus documentos', { primary: true, icon: 'upload', action: 'pmOpen', arg: 'creddocs:x' }) + C.btn(inv ? 'Volver a pedírselo' : 'Pedir que lo haga él', { icon: 'msg', action: 'pmOpen', arg: 'invite:x' });
+    }
+    return secHead('Crédito') + '<section class="card card-pad"><div class="row-between"><h3 class="h3">Solicitud de crédito</h3>' + badge(BADGE[0], BADGE[1]) + '</div>' +
+      '<p class="muted mt-8">' + msg + '</p>' + (fase === 'no' ? '' : docsList(c.docs)) +
+      '<div class="pn-credit-actions mt-16">' + actions + '</div></section>' + note;
   }
 
   function tabPedidos(id, v) {
@@ -303,7 +320,8 @@
     } else if (kind === 'seller') {
       const p = id === 'new' ? null : P().equipo.find(function (x) { return x.id === id; });
       C.ui.draft = p ? C.clone(p) : { nombre: '', rol: 'Vendedor', email: '', wa: '' };
-    } else if (kind === 'invite') C.ui.draft = {};
+    } else if (kind === 'creddocs') C.ui.draft = { cdocs: C.clone(Object.assign(C.emptyDocs(), s.credito.docs || {})) };
+    else if (kind === 'invite' || kind === 'firma') C.ui.draft = {};
     C.renderOverlays();
   }
   A.pmOpen = function (el) { const a = el.dataset.arg.split(':'); openModal(a[0], a[1], { sucId: a[2] }); };
@@ -351,8 +369,19 @@
         C.field({ label: 'Cargo', bind: 'ui.draft.rol', cls: 'span-2' }) + '</div>';
     } else if (m.kind === 'invite') {
       title = 'Pedir al cliente que solicite su crédito'; save = 'Enviar';
-      body = '<p>Le enviamos un enlace para que, desde su celular, suba sus documentos y firme electrónicamente la solicitud.</p>' +
-        '<dl class="pn-rows mt-16"><div><dt>Para</dt><dd>' + e(fullName(s.user)) + '</dd></div><div><dt>Correo</dt><dd>' + e(s.user.email || '—') + '</dd></div><div><dt>WhatsApp</dt><dd>' + e(s.user.wa || '—') + '</dd></div></dl>';
+      body = '<p>Le enviamos un enlace para que, desde su celular o PC, suba sus documentos y firme electrónicamente la solicitud.</p>' + paraRows(s);
+    } else if (m.kind === 'creddocs') {
+      title = 'Documentos para el crédito';
+      body = '<p class="muted mb-12">Sube lo que tengas: lo que falte lo puede subir el cliente. La firma y la autorización las hace él desde su dispositivo.</p>' +
+        '<div class="docs cred-docs-up">' + C.CREDITO_DOCS.map(function (x) { return C.uploadSlot({ path: 'ui.draft.cdocs.' + x.key, label: x.label, hint: x.hint, multiple: x.multiple, max: x.max, cta: x.cta, sub: x.sub }); }).join('') +
+        '<div class="docs-full"><p class="upload-label">Carnet del representante legal</p><p class="hint">Cédula de Identidad, ambas caras</p><div class="docs-pair">' +
+        C.uploadSlot({ path: 'ui.draft.cdocs.anverso', cta: 'Anverso', sub: 'Subir foto', accept: 'image/*,.pdf' }) +
+        C.uploadSlot({ path: 'ui.draft.cdocs.reverso', cta: 'Reverso', sub: 'Subir foto', accept: 'image/*,.pdf' }) + '</div></div></div>';
+    } else if (m.kind === 'firma') {
+      const c = s.credito, faltan = C.DOC_KEYS.filter(function (k) { return !((c.docs || {})[k] || []).length; });
+      title = c.enviadoFirma ? 'Reenviar aviso para firmar' : 'Enviar al cliente para firmar'; save = 'Enviar';
+      body = '<p>Le llega un enlace por correo y WhatsApp. Desde su celular o PC revisa los documentos, firma con el dedo o el mouse y envía la solicitud.</p>' + paraRows(s) +
+        (faltan.length ? '<p class="pn-warn mt-16">' + C.icon('alert', 16) + ' Faltan ' + faltan.length + ': ' + e(faltan.map(function (k) { return C.DOC_LABELS[k]; }).join(', ')) + '. El cliente los sube antes de firmar.</p>' : '');
     }
     return '<div class="overlay modal-overlay" data-action="pmClose"></div>' +
       '<div class="pmodal" role="dialog" aria-modal="true" aria-labelledby="pm-title">' +
@@ -361,6 +390,9 @@
       '<footer class="pmodal-foot"><div>' + (del ? C.link('Eliminar', 'pmAskDelete', m.kind + ':' + m.id) : '') + '</div><div class="pmodal-actions">' +
       C.btn('Cancelar', { action: 'pmClose' }) + C.btn(save, { primary: true, action: 'pmSave' }) + '</div></footer></div>';
   };
+  function paraRows(s) {
+    return '<dl class="pn-rows mt-16"><div><dt>Para</dt><dd>' + e(fullName(s.user)) + '</dd></div><div><dt>Correo</dt><dd>' + e(s.user.email || '—') + '</dd></div><div><dt>WhatsApp</dt><dd>' + e(s.user.wa || '—') + '</dd></div></dl>';
+  }
   C.mountPnModal = function () {
     const f = document.querySelector('.pmodal .has-error input, .pmodal .has-error select');
     if (f) { f.focus(); return; }
@@ -436,6 +468,20 @@
       emp.credito.invitado = { fecha: C.nowISO(), por: C.persona().nombre };
       addLog({ accion: 'invitacion', empresaId: sc, texto: 'Le pidió al cliente que solicite Crédito Cooltiva (correo y WhatsApp)' });
       C.toast('Enviado a ' + (emp.user.email || 'el cliente') + ' y al WhatsApp ' + (emp.user.wa || ''));
+    } else if (m.kind === 'creddocs') {
+      const emp = C.empresa(sc), me = C.persona().nombre, docs = C.emptyDocs();
+      // cada archivo nuevo queda marcado con el vendedor que lo subió
+      C.DOC_KEYS.forEach(function (k) { docs[k] = ((d.cdocs || {})[k] || []).map(function (f) { return f.por ? f : Object.assign({}, f, { por: me }); }); });
+      const names = function (x) { return JSON.stringify(C.DOC_KEYS.map(function (k) { return (x[k] || []).map(function (f) { return f.name; }); })); };
+      if (names(docs) === names(emp.credito.docs || {})) { C.toast('Sin cambios'); }
+      else commit(sc, [{ op: 'set', path: 'credito.docs', value: docs }], 'Cargó documentos para el crédito');
+    } else if (m.kind === 'firma') {
+      const emp = C.empresa(sc), again = !!emp.credito.enviadoFirma;
+      emp.credito.enviadoFirma = { fecha: C.nowISO(), por: C.persona().nombre };
+      emp.actualizado = C.nowISO();
+      addLog({ accion: 'firma', empresaId: sc, texto: (again ? 'Reenvió' : 'Envió') + ' la solicitud de crédito al cliente para que firme desde su dispositivo (correo y WhatsApp)' });
+      C.save();
+      C.toast('Enviado a ' + (emp.user.email || 'el cliente') + ' y al WhatsApp ' + (emp.user.wa || ''));
     }
     C.ui.pnModal = null; C.ui.errors = {};
     C.set();
@@ -479,10 +525,12 @@
         '<div class="pn-change-body"><strong>' + e(cap(d.title)) + '</strong><div class="pn-chgs">' + detail + '</div></div></li>';
     }).join('') + '</ul>';
   }
-  const VERB = { cambio: 'editó', alta: 'creó la cuenta', reversion: 'revirtió un cambio', pedido: 'hizo un pedido', credito: 'solicitó crédito', invitacion: 'pidió al cliente que solicite crédito', equipo: 'actualizó el equipo' };
+  const VERB = { cambio: 'editó', alta: 'creó la cuenta', reversion: 'revirtió un cambio', pedido: 'hizo un pedido', credito: 'solicitó crédito', invitacion: 'pidió al cliente que solicite crédito', firma: 'envió el crédito para firmar', equipo: 'actualizó el equipo' };
   function entryCard(l, withEmpresa, flags) {
     const emp = C.empresa(l.empresaId), actor = C.persona(l.actor);
-    const revertible = (l.accion === 'cambio' || l.accion === 'alta') && l.actor !== 'cliente' && !l.revertedBy && emp && emp.estado !== 'baja';
+    // los documentos del crédito ya no se revierten cuando el cliente firmó
+    const credFirmado = emp && (l.ops || []).some(function (o) { return o.path === 'credito.docs'; }) && (emp.credito.estado === 'solicitado' || emp.credito.estado === 'aprobado');
+    const revertible = (l.accion === 'cambio' || l.accion === 'alta') && l.actor !== 'cliente' && !l.revertedBy && emp && emp.estado !== 'baja' && !credFirmado;
     const who = l.actor === P().persona ? 'Tú' : actor.nombre;
     return '<article class="card pn-entry' + (flags.isNew ? ' is-new' : '') + (l.revertedBy ? ' is-reverted' : '') + '">' +
       '<header class="pn-entry-head">' + avatar(actor.nombre, 'is-sm') + '<div class="pn-entry-t"><span><strong>' + e(who) + '</strong> ' + e(VERB[l.accion] || '') +
@@ -681,7 +729,7 @@
   NV.credito = function (i) {
     const cr = N().credito, c = N().contacto;
     return nPage(i, '<div class="row wz-title-row"><h1 class="h1">Crédito Cooltiva</h1><span class="tag">Opcional</span></div>' +
-      '<p class="lead mb-12">El crédito lo solicita el cliente desde su celular, porque firma electrónicamente. Tú solo puedes pedírselo.</p>' +
+      '<p class="lead mb-12">La firma electrónica la hace el cliente desde su dispositivo. Si quieres ayudarle, después de crear la cuenta puedes cargar sus documentos desde su ficha → Crédito.</p>' +
       '<div class="choice-grid cols-2">' +
       C.choice({ label: 'Sin crédito por ahora', sub: 'Paga con QR o contraentrega.', selected: !cr.invitar, action: 'pnNCred', arg: 'no' }) +
       C.choice({ label: 'Pedirle que solicite crédito', sub: 'Le llega un enlace por correo y WhatsApp' + (c.email ? ' (' + e(c.email) + ')' : '') + ' para subir sus documentos y firmar.', selected: !!cr.invitar, action: 'pnNCred', arg: 'si' }) + '</div>');

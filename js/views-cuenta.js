@@ -309,8 +309,9 @@
   };
 
   /* ===================== CRÉDITO =====================
-     Sin crédito: el cliente lo solicita él mismo (documentos + firma
-     electrónica desde su dispositivo). El vendedor no puede hacerlo. */
+     Sin crédito: el cliente lo solicita (documentos + firma electrónica
+     desde su dispositivo). Un vendedor puede haberle cargado los
+     documentos desde el panel; la firma y la autorización son del cliente. */
   C.creditoContent = function (opts) {
     opts = opts || {};
     const c = C.S.account.credito, st = c.estado;
@@ -323,12 +324,20 @@
           return '<li class="' + (f.length ? 'is-ok' : 'is-missing') + '"><span class="pn-doc-mark" aria-hidden="true">' + C.icon(f.length ? 'check' : 'x', 13) + '</span><span><strong>' + C.DOC_LABELS[k] + '</strong></span></li>';
         }).join('') + '</ul>';
     }
-    if (C.S.acting) return '<p class="muted">El cliente debe solicitar el crédito desde su celular, porque firma electrónicamente. Desde el panel puedes pedírselo.</p>';
+    if (C.S.acting) return '<p class="muted">La firma la hace el cliente desde su dispositivo. Prepara la solicitud desde el panel: ficha de la empresa → Crédito.</p>';
+    // si un vendedor ya cargó documentos, el formulario llega con ellos
+    if (!C.ui.draft.cdocs || C.ui.draft.cdocsFor !== C.S.account.id) {
+      C.ui.draft.cdocs = C.clone(Object.assign(C.emptyDocs(), c.docs || {}));
+      C.ui.draft.cdocsFor = C.S.account.id;
+    }
+    const por = C.docsPor(c.docs);
     const info = C.CREDITO_INFO.map(function (x) {
       return '<div class="card card-pad info-card"><span class="info-ico" aria-hidden="true"></span><h3 class="h3">' + e(x.title) + '</h3><p class="muted small">' + e(x.text) + '</p></div>';
     }).join('');
     const drawHint = C.isMobile() ? 'Dibuja tu firma con el dedo' : 'Dibuja tu firma con el mouse';
-    return '<div class="cred-req">' + (opts.inModal ? '' : '<p class="lead">Solicítalo una sola vez: sube tus documentos y firma desde este dispositivo.</p>') +
+    const lead = por.length ? 'Tu asesor de Cooltiva (' + e(por.join(', ')) + ') ya cargó tus documentos. Revísalos, sube lo que falte, firma y envía.'
+      : (opts.inModal ? '' : 'Solicítalo una sola vez: sube tus documentos y firma desde este dispositivo.');
+    return '<div class="cred-req">' + (lead ? '<p class="lead">' + lead + '</p>' : '') +
       '<div class="info-grid mt-16">' + info + '</div>' +
       '<h3 class="h3 mt-24">Documentos</h3><div class="docs cred-docs-up">' +
       C.CREDITO_DOCS.map(function (d) { return C.uploadSlot({ path: 'ui.draft.cdocs.' + d.key, label: d.label, hint: d.hint, multiple: d.multiple, max: d.max, cta: d.cta, sub: d.sub }); }).join('') +
@@ -379,8 +388,9 @@
     if (Object.keys(err).length) return C.fail(err);
     const now = C.isoDate(C.DEMO_TODAY) + 'T' + new Date().toTimeString().slice(0, 5);
     const a = C.S.account;
-    a.credito = { estado: 'solicitado', linea: 0, plazo: 30, usado: 0, docs: C.clone(Object.assign(C.emptyDocs(), docs)), solicitado: now };
-    C.S.panel.log.unshift({ id: C.uid('l'), fecha: now, actor: 'cliente', accion: 'credito', empresaId: a.id, texto: 'El cliente solicitó Crédito Cooltiva desde su dispositivo, con firma electrónica' });
+    const asistido = C.docsPor(docs);
+    a.credito = { estado: 'solicitado', linea: 0, plazo: 30, usado: 0, docs: C.clone(Object.assign(C.emptyDocs(), docs)), solicitado: now, asistido: asistido };
+    C.S.panel.log.unshift({ id: C.uid('l'), fecha: now, actor: 'cliente', accion: 'credito', empresaId: a.id, texto: 'El cliente firmó y envió la solicitud de Crédito Cooltiva desde su dispositivo' + (asistido.length ? ' (documentos cargados por ' + asistido.join(', ') + ')' : '') });
     C.ui.draft = {}; C.ui.errors = {};
     C.set();
     C.toast('Solicitud enviada · te avisaremos cuando esté aprobada');

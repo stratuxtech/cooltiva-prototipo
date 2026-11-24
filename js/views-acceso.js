@@ -233,7 +233,7 @@
     const key = o.path;
     const full = !o.multiple ? files.length >= 1 : (o.max && files.length >= o.max);
     const list = files.map(function (f, i) {
-      return '<li class="file">' + C.icon('file', 16) + '<span class="file-name">' + e(f.name) + '</span><button type="button" class="file-x" aria-label="Quitar ' + e(f.name) + '" data-action="fileRemove" data-arg="' + key + '|' + i + '">' + C.icon('x', 14) + '</button></li>';
+      return '<li class="file">' + C.icon('file', 16) + '<span class="file-name">' + e(f.name) + (f.por ? '<span class="file-by">Cargado por ' + e(f.por) + '</span>' : '') + '</span><button type="button" class="file-x" aria-label="Quitar ' + e(f.name) + '" data-action="fileRemove" data-arg="' + key + '|' + i + '">' + C.icon('x', 14) + '</button></li>';
     }).join('');
     const drop = full ? '' :
       '<label class="drop' + (files.length ? ' is-compact' : '') + '">' +

@@ -17,6 +17,28 @@
     };
   };
   C.emptyDocs = function () { return { nit: [], seprec: [], f200: [], poder: [], anverso: [], reverso: [] }; };
+  /* Documentos que un vendedor ya cargó (falta el carnet, que el cliente saca con su celular) */
+  C.partialDocs = function (por) {
+    const d = C.fullDocs();
+    C.DOC_KEYS.forEach(function (k) { d[k].forEach(function (f) { f.por = por; }); });
+    d.anverso = []; d.reverso = [];
+    return d;
+  };
+  C.docsCount = function (docs) { return C.DOC_KEYS.filter(function (k) { return ((docs || {})[k] || []).length; }).length; };
+  /* Quién ayudó a cargar documentos (vendedores) */
+  C.docsPor = function (docs) {
+    const out = [];
+    C.DOC_KEYS.forEach(function (k) { ((docs || {})[k] || []).forEach(function (f) { if (f.por && out.indexOf(f.por) < 0) out.push(f.por); }); });
+    return out;
+  };
+  /* Fase del crédito: el vendedor puede preparar los documentos,
+     pero la firma y la autorización las hace el cliente desde su dispositivo.
+     no → preparacion (hay documentos) → firma (se envió al cliente) → solicitado → aprobado */
+  C.creditoFase = function (c) {
+    if (c.estado === 'aprobado' || c.estado === 'solicitado') return c.estado;
+    if (c.enviadoFirma) return 'firma';
+    return C.docsCount(c.docs) ? 'preparacion' : 'no';
+  };
 
   C.PERSONAS = [
     { id: 'fabiana', nombre: 'Fabiana Paz', rol: 'Vendedora', email: 'fabiana.paz@cooltiva.bo', wa: '+591 7600 1001' },
@@ -120,9 +142,12 @@
   /* ===================== Motor de operaciones ===================== */
   /* op: {op:'set', path, value, before} | {op:'add', coll, item} |
          {op:'update', coll, id, value, before} | {op:'remove', coll, id, before, removedRecs} */
+  /* path admite puntos: 'credito.docs' */
+  function getIn(obj, path) { return path.split('.').reduce(function (o, k) { return o == null ? undefined : o[k]; }, obj); }
+  function setIn(obj, path, v) { const ks = path.split('.'), last = ks.pop(); ks.reduce(function (o, k) { return o[k] || (o[k] = {}); }, obj)[last] = v; }
   C.applyOps = function (emp, ops) {
     (ops || []).forEach(function (o) {
-      if (o.op === 'set') emp[o.path] = C.clone(o.value);
+      if (o.op === 'set') setIn(emp, o.path, C.clone(o.value));
       else if (o.op === 'add') emp[o.coll].push(C.clone(o.item));
       else if (o.op === 'update') {
         const i = emp[o.coll].findIndex(function (x) { return x.id === o.id; });
@@ -139,7 +164,7 @@
   C.withBefore = function (emp, ops) {
     return ops.map(function (o) {
       o = C.clone(o);
-      if (o.op === 'set') o.before = C.clone(emp[o.path]);
+      if (o.op === 'set') o.before = C.clone(getIn(emp, o.path));
       if (o.op === 'update' || o.op === 'remove') o.before = C.clone(emp[o.coll].find(function (x) { return x.id === o.id; }));
       if (o.op === 'remove' && o.coll === 'sucursales') o.removedRecs = C.clone(emp.recepcionistas.filter(function (r) { return r.sucursalId === o.id; }));
       return o;
@@ -174,7 +199,7 @@
     dir: 'Dirección', ciudad: 'Ciudad', tel: 'Teléfono', sucursalId: 'Sucursal'
   };
   const NOUN = { sucursales: 'sucursal', recepcionistas: 'recepcionista', empleados: 'usuario' };
-  C.CREDITO_ESTADOS = { aprobado: 'Aprobado', no: 'Sin crédito', solicitado: 'Solicitado · en revisión' };
+  C.CREDITO_ESTADOS = { aprobado: 'Aprobado', no: 'Sin crédito', preparacion: 'En preparación', firma: 'Pendiente de firma del cliente', solicitado: 'Solicitado · en revisión' };
 
   function fmtVal(k, v, emp) {
     if (v == null || v === '') return '—';
@@ -195,6 +220,12 @@
       .map(function (k) { return { label: FIELD[k], before: before ? fmtVal(k, before[k], emp) : null, after: after ? fmtVal(k, after[k], emp) : null }; });
   }
   C.describeOp = function (o, emp) {
+    if (o.op === 'set' && o.path === 'credito.docs') {
+      const names = function (docs, k) { return ((docs || {})[k] || []).map(function (f) { return f.name; }).join(', '); };
+      const rows = C.DOC_KEYS.filter(function (k) { return names(o.before, k) !== names(o.value, k); })
+        .map(function (k) { return { label: C.DOC_LABELS[k], before: names(o.before, k) || 'Falta', after: names(o.value, k) || 'Falta' }; });
+      return { kind: 'edit', title: 'Documentos del crédito', rows: rows };
+    }
     if (o.op === 'set') {
       const title = { user: 'Contacto principal', formaJuridica: 'Datos legales', empresa: 'Nombre comercial' }[o.path] || o.path;
       const rows = o.path === 'empresa' ? [{ label: 'Nombre comercial', before: o.before || '—', after: o.value }] : diffRows(o.before, o.value, emp);

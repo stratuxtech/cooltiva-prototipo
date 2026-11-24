@@ -16,7 +16,7 @@
   /* arg: 'suc:new' | 'suc:<id>' | 'rec:new' | 'rec:<id>' | 'credito' | '<seccion>' */
   C.openModal = function (arg) {
     const ui = C.ui;
-    if (C.S.acting && arg !== 'credito') { C.toast('En modo vendedor, estos datos se editan desde el panel y pasan por aprobación'); return; }
+    if (C.S.acting && arg !== 'credito') { C.toast('En modo vendedor, estos datos se editan desde el panel'); return; }
     ui.errors = {};
     const [kind, id] = arg.split(':');
     if (kind === 'suc') {

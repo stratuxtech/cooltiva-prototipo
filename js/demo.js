@@ -130,7 +130,8 @@
       ['7a', 'Crédito aprobado', function () { base(true); C.go('/cuenta/credito'); }],
       ['7b', 'Solicitar crédito (sin crédito)', function () { base(true); sinCredito(); C.go('/cuenta/credito'); }],
       ['7c', 'Solicitud enviada', function () { base(true); C.S.account.credito = { estado: 'solicitado', linea: 0, plazo: 30, usado: 0, solicitado: '2026-11-24T10:15', docs: C.fullDocs() }; C.go('/cuenta/credito'); }],
-      ['7d', 'Desde el pago: solicitar crédito', function () { base(true); sinCredito(); cartUpTo('pago', 'qr'); C.go('/compra/pago'); C._after = function () { C.openModal('credito'); }; }]
+      ['7d', 'Desde el pago: solicitar crédito', function () { base(true); sinCredito(); cartUpTo('pago', 'qr'); C.go('/compra/pago'); C._after = function () { C.openModal('credito'); }; }],
+      ['7e', 'Firmar lo que cargó el vendedor', function () { base(true); C.S.account.credito = { estado: 'no', linea: 0, plazo: 30, usado: 0, docs: C.partialDocs('Fabiana Paz'), enviadoFirma: { fecha: '2026-11-24T09:40', por: 'Fabiana Paz' } }; C.go('/cuenta/credito'); }]
     ] },
     { flow: '8 · Panel de vendedores', items: [
       ['8a', 'Login del vendedor', function () { base(false); C.go('/panel/login'); }],
@@ -150,7 +151,10 @@
       ['8o', 'Nueva cuenta · revisar y crear', function () { pbase(); fillNueva(4); C.go('/panel/nueva/revisar'); }],
       ['8p', 'Cuenta creada (aviso al equipo)', function () { pbase(); fillNueva(4); A.pnNSubmit(); }],
       ['8q', 'Modo vendedor: pedido para el cliente', function () { pbase(); A.pnActAs({ dataset: { arg: 'hotel' } }); }],
-      ['8r', 'Equipo · editar vendedor', function () { pbase(); C.go('/panel/equipo'); C._after = function () { A.pmOpen({ dataset: { arg: 'seller:jorge' } }); }; }]
+      ['8r', 'Equipo · editar vendedor', function () { pbase(); C.go('/panel/equipo'); C._after = function () { A.pmOpen({ dataset: { arg: 'seller:jorge' } }); }; }],
+      ['8s', 'Crédito · cargar documentos del cliente', function () { pbase(); C.go('/panel/empresa/donarosa/credito'); C._after = function () { A.pmOpen({ dataset: { arg: 'creddocs:x' } }); }; }],
+      ['8t', 'Crédito · enviar al cliente para firmar', function () { pbase(); C.S.empresas.donarosa.credito.docs = C.partialDocs('Fabiana Paz'); C.go('/panel/empresa/donarosa/credito'); C._after = function () { A.pmOpen({ dataset: { arg: 'firma:x' } }); }; }],
+      ['8u', 'Crédito · pendiente de firma del cliente', function () { pbase(); const c = C.S.empresas.donarosa.credito; c.docs = C.partialDocs('Fabiana Paz'); c.enviadoFirma = { fecha: '2026-11-24T09:40', por: 'Fabiana Paz' }; C.go('/panel/empresa/donarosa/credito'); }]
     ] }
   ];
   function pbase() { base(false); C.S.panel.loggedIn = true; C.S.panel.persona = 'fabiana'; }

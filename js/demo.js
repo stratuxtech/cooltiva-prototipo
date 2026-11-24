@@ -107,12 +107,11 @@
         ['3s', 'Pedidos realizados', function () { orderWith('credito', true); }]
       ] }
     ] },
-    { flow: '4 · Empleados', items: [
-      ['4a', 'Agregar empleado', function () { base(true); C.go('/cuenta/empleados'); }],
-      ['4b', 'Datos completos', function () { base(true); C.goWith('/cuenta/empleados', { draft: { email: 'carla.flores@restaurante.bo', wa: '+591 7000 0003' } }); }],
-      ['4c', 'Invitación enviada', function () { base(true); C.S.account.empleados.push({ id: 'e3', email: 'carla.flores@restaurante.bo', wa: '+591 7000 0003' }); C.goWith('/cuenta/empleados', { invited: { email: 'carla.flores@restaurante.bo', wa: '+591 7000 0003' } }); }],
-      ['4d', 'Editar empleado', function () { base(true); C.goWith('/cuenta/empleados', { editing: { type: 'emp', id: 'e1' }, draft: { editEmail: 'ana.rojas@restaurante.bo', editWa: '+591 7000 0001' } }); }],
-      ['4e', 'Eliminar empleado', function () { base(true); C.go('/cuenta/empleados'); C._after = function () { A.empDelete({ dataset: { arg: 'e2' } }); }; }]
+    { flow: '4 · Responsables', items: [
+      ['4a', 'Agregar responsable', function () { base(true); C.go('/cuenta/responsables'); }],
+      ['4b', 'Datos completos', function () { base(true); C.goWith('/cuenta/responsables', { draft: { email: 'carla.flores@restaurante.bo', wa: '+591 7000 0003' } }); }],
+      ['4c', 'Invitación enviada', function () { base(true); C.S.account.empleados.push({ id: 'e3', email: 'carla.flores@restaurante.bo', wa: '+591 7000 0003' }); C.goWith('/cuenta/responsables', { invited: { email: 'carla.flores@restaurante.bo', wa: '+591 7000 0003' } }); }],
+      ['4d', 'Eliminar responsable', function () { base(true); C.go('/cuenta/responsables'); C._after = function () { A.empDelete({ dataset: { arg: 'e2' } }); }; }]
     ] },
     { flow: '5 · Sucursales', items: [
       ['5a', 'Listado', function () { base(true); C.go('/cuenta/sucursales'); }],
@@ -128,41 +127,42 @@
       ['6e', 'Eliminar recepcionista', function () { base(true); C.go('/cuenta/recepcionistas'); C._after = function () { C.confirmDeleteRecep('r2'); }; }]
     ] },
     { flow: '7 · Crédito', items: [
-      ['7a', 'Crédito aprobado', function () { base(true); C.go('/cuenta/credito'); }]
+      ['7a', 'Crédito aprobado', function () { base(true); C.go('/cuenta/credito'); }],
+      ['7b', 'Solicitar crédito (sin crédito)', function () { base(true); sinCredito(); C.go('/cuenta/credito'); }],
+      ['7c', 'Solicitud enviada', function () { base(true); C.S.account.credito = { estado: 'solicitado', linea: 0, plazo: 30, usado: 0, solicitado: '2026-11-24T10:15', docs: C.fullDocs() }; C.go('/cuenta/credito'); }],
+      ['7d', 'Desde el pago: solicitar crédito', function () { base(true); sinCredito(); cartUpTo('pago', 'qr'); C.go('/compra/pago'); C._after = function () { C.openModal('credito'); }; }]
     ] },
     { flow: '8 · Panel de vendedores', items: [
       ['8a', 'Login del vendedor', function () { base(false); C.go('/panel/login'); }],
       ['8b', 'Empresas y sus usuarios', function () { pbase(); C.go('/panel/empresas'); }],
       ['8c', 'Ficha de empresa', function () { pbase(); C.go('/panel/empresa/fogon/usuarios'); }],
-      ['8d', 'Edición en borrador', function () { pbase(); draftFogon(); C.go('/panel/empresa/fogon/sucursales'); }],
-      ['8e', 'Revisar y enviar (confirmación)', function () { pbase(); draftFogon(); C.goWith('/panel/empresa/fogon/revisar', { draft: { revisor: 'jorge', nota: 'La clienta pidió por WhatsApp cambiar la dirección y sumar una recepcionista.', notificar: true } }); }],
-      ['8f', 'Enviado · notificación al aprobador', function () { pbase(); draftFogon(); C.ui.draft = { revisor: 'jorge', nota: 'La clienta pidió por WhatsApp cambiar la dirección y sumar una recepcionista.', notificar: true }; A.pnSend({ dataset: { arg: 'fogon' } }); }],
-      ['8g', 'Aprobaciones por revisar', function () { pbase(); C.go('/panel/aprobaciones'); }],
-      ['8h', 'Aprobar cambios (#106)', function () { pbase(); C.go('/panel/solicitud/106'); }],
-      ['8i', 'Aprobar alta de cuenta (#107)', function () { pbase(); C.go('/panel/solicitud/107'); }],
-      ['8j', 'Nueva cuenta · contacto', function () { pbase(); C.go('/panel/nueva/contacto'); }],
-      ['8k', 'Nueva cuenta · crédito y contrato', function () { pbase(); fillNueva(4); C.go('/panel/nueva/credito'); }],
-      ['8l', 'Nueva cuenta · revisar y enviar', function () { pbase(); fillNueva(5); C.S.panel.nueva.revisor = 'jorge'; C.go('/panel/nueva/revisar'); }],
-      ['8m', 'Crédito solicitado por el cliente', function () { pbase(); C.go('/panel/empresa/altura/credito'); }],
-      ['8n', 'Registro de cambios', function () { pbase(); C.go('/panel/registro'); }],
-      ['8o', 'Equipo', function () { pbase(); C.go('/panel/equipo'); }],
-      ['8q', 'Nueva cuenta · sucursal agregada (tarjeta)', function () { pbase(); fillNueva(2); C.go('/panel/nueva/sucursales'); }],
-      ['8p', 'Modo vendedor: pedido para el cliente', function () { pbase(); A.pnActAs({ dataset: { arg: 'hotel' } }); }]
+      ['8d', 'Modal · editar usuario', function () { pbase(); C.go('/panel/empresa/fogon/usuarios'); C._after = function () { A.pmOpen({ dataset: { arg: 'user:e1' } }); }; }],
+      ['8e', 'Modal · editar sucursal', function () { pbase(); C.go('/panel/empresa/fogon/sucursales'); C._after = function () { A.pmOpen({ dataset: { arg: 'suc:s2' } }); }; }],
+      ['8f', 'Modal · agregar recepcionista', function () { pbase(); C.go('/panel/empresa/fogon/recepcionistas'); C._after = function () { A.pmOpen({ dataset: { arg: 'rec:new:s2' } }); }; }],
+      ['8g', 'Modal · datos legales', function () { pbase(); C.go('/panel/empresa/fogon/legal'); C._after = function () { A.pmOpen({ dataset: { arg: 'legal:x' } }); }; }],
+      ['8h', 'Registro de cambios (novedades)', function () { pbase(); C.go('/panel/registro'); }],
+      ['8i', 'Revertir un cambio de otro vendedor', function () { pbase(); C.go('/panel/registro'); C._after = function () { A.pnRevert({ dataset: { arg: 'l8' } }); }; }],
+      ['8j', 'Crédito · pedir al cliente', function () { pbase(); C.go('/panel/empresa/donarosa/credito'); C._after = function () { A.pmOpen({ dataset: { arg: 'invite:x' } }); }; }],
+      ['8k', 'Crédito solicitado por el cliente', function () { pbase(); C.go('/panel/empresa/altura/credito'); }],
+      ['8l', 'Nueva cuenta · contacto', function () { pbase(); C.go('/panel/nueva/contacto'); }],
+      ['8m', 'Nueva cuenta · sucursales y recepcionistas', function () { pbase(); fillNueva(2); C.go('/panel/nueva/sucursales'); }],
+      ['8n', 'Nueva cuenta · crédito', function () { pbase(); fillNueva(3); C.go('/panel/nueva/credito'); }],
+      ['8o', 'Nueva cuenta · revisar y crear', function () { pbase(); fillNueva(4); C.go('/panel/nueva/revisar'); }],
+      ['8p', 'Cuenta creada (aviso al equipo)', function () { pbase(); fillNueva(4); A.pnNSubmit(); }],
+      ['8q', 'Modo vendedor: pedido para el cliente', function () { pbase(); A.pnActAs({ dataset: { arg: 'hotel' } }); }],
+      ['8r', 'Equipo · editar vendedor', function () { pbase(); C.go('/panel/equipo'); C._after = function () { A.pmOpen({ dataset: { arg: 'seller:jorge' } }); }; }]
     ] }
   ];
   function pbase() { base(false); C.S.panel.loggedIn = true; C.S.panel.persona = 'fabiana'; }
-  function draftFogon() {
-    C.draftAdd('fogon', { op: 'update', coll: 'sucursales', id: 's2', value: { dir: 'Calle 21 de Calacoto 480' } });
-    C.draftAdd('fogon', { op: 'add', coll: 'recepcionistas', item: { id: 'rnew', nombre: 'Lidia Condori', tel: '7266 9012', sucursalId: 's2' } });
-    C.draftAdd('fogon', { op: 'set', path: 'user', value: Object.assign(C.clone(C.S.empresas.fogon.user), { wa: '+591 7000 0099' }) });
-  }
+  function sinCredito() { C.S.account.credito = { estado: 'no', linea: 0, plazo: 30, usado: 0, docs: C.emptyDocs() }; }
   function fillNueva(step) {
     const n = C.S.panel.nueva;
     n.contacto = { empresa: 'Pensión La Casona', nombre: 'Julia', apellido: 'Céspedes', rol: 'Dueño', email: 'julia@lacasona.bo', wa: '+591 7455 1212' };
     n.fj = { tipo: 'unipersonal', ci: '', razon: 'Pensión La Casona', nit: '6012345019', matricula: '00477812' };
-    n.sucursales = [{ id: 'ns1', dir: 'Calle Sucre 455', ciudad: 'Cochabamba', pin: { x: 44, y: 50 } }];
-    n.recepcionistas = [{ id: 'nr1', nombre: 'Carlos Rocha', tel: '7455 3434', sucursalId: 'ns1' }];
-    n.credito = { con: 'si', linea: '8000', plazo: '30', docs: C.fullDocs() };
+    n.sucursales = [{ id: 'ns1', dir: 'Calle Sucre 455', ciudad: 'Cochabamba', pin: { x: 44, y: 50 } }, { id: 'ns2', dir: 'Av. América Este 1180', ciudad: 'Cochabamba', pin: { x: 62, y: 36 } }];
+    n.recepcionistas = [{ id: 'nr1', nombre: 'Carlos Rocha', tel: '7455 3434', sucursalId: 'ns1' }, { id: 'nr2', nombre: 'Elena Vargas', tel: '7455 5656', sucursalId: 'ns2' }];
+    n.credito = { invitar: true };
+    n.enviarAcceso = true;
     n.maxStep = step;
   }
   C.allScenarios = function () {
@@ -240,7 +240,7 @@
       return head + '<section class="demo-sec"><h3 class="demo-h">Perfil en el panel</h3>' +
         '<div class="select-wrap"><select class="input select" data-bind="panel.persona" data-rerender aria-label="Perfil">' +
         S.panel.equipo.map(function (p) { return '<option value="' + p.id + '"' + (S.panel.persona === p.id ? ' selected' : '') + '>' + e(p.nombre + ' · ' + p.rol) + '</option>'; }).join('') + '</select>' + C.icon('chevDown', 16) + '</div>' +
-        '<p class="hint mt-8">Quien envía no puede aprobar. Cambia de perfil para aprobar o rechazar.</p></section>' +
+        '<p class="hint mt-8">Cambia de perfil para ver los cambios de otro vendedor como novedad y revertirlos.</p></section>' +
         '<p class="demo-foot muted small">Ruta actual: <code>#' + e(path) + '</code></p></div></aside>';
     }
     return head +
@@ -262,7 +262,7 @@
 
       '<section class="demo-sec"><h3 class="demo-h">Datos de la cuenta</h3><div class="demo-row">' +
       C.btn('Cargar ejemplo', { action: 'demoData', arg: 'seed', sm: true }) + C.btn('Vaciar', { action: 'demoData', arg: 'empty', sm: true }) + '</div>' +
-      '<p class="hint mt-8">“Vaciar” quita sucursales, recepcionistas, empleados y pedidos para ver los estados vacíos.</p></section>' +
+      '<p class="hint mt-8">“Vaciar” quita sucursales, recepcionistas, responsables y pedidos para ver los estados vacíos.</p></section>' +
 
       '<section class="demo-sec"><h3 class="demo-h">Atajos de compra</h3><div class="demo-row">' +
       C.btn('Pedido listo para pagar', { action: 'demoCart', arg: 'pago', sm: true }) + C.btn('Vaciar pedido', { action: 'demoCart', arg: 'clear', sm: true }) + '</div></section>' +

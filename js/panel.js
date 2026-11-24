@@ -1,10 +1,14 @@
 /* =========================================================
    PANEL DE VENDEDORES
-   Empresas · Ficha (edición en borrador) · Revisar y enviar ·
-   Aprobaciones · Nueva cuenta (wizard) · Registro · Equipo ·
+   Empresas · Ficha (todo editable, en modales) · Registro de
+   cambios (con "Revertir") · Nueva cuenta (wizard) · Equipo ·
    Modo vendedor (comprar por el cliente)
-   Principio: rápido para el vendedor. Poca información por
-   pantalla; el control está en "borrador → aprobar".
+
+   Lógica de confianza: el vendedor guarda y el cambio se aplica
+   al instante. Se avisa al resto del equipo y queda en el
+   registro; cualquier otro vendedor puede revertirlo.
+   El crédito NO lo crea el vendedor: el cliente lo solicita y
+   firma desde su dispositivo. El vendedor solo puede pedírselo.
    ========================================================= */
 (function () {
   const e = C.esc;
@@ -19,35 +23,45 @@
   const badge = function (t, kind) { return '<span class="pn-badge is-' + (kind || 'neutral') + '">' + e(t) + '</span>'; };
   const fullName = function (u) { return ((u.nombre || '') + ' ' + (u.apellido || '')).trim(); };
   const cap = function (s) { return String(s || '').replace(/^./, function (c) { return c.toUpperCase(); }); };
-  function log(accion, empresaId, texto, req) {
-    P().log.unshift({ id: C.uid('l'), fecha: C.nowISO(), actor: P().persona, accion: accion, empresaId: empresaId, texto: texto, req: req || null });
-  }
+  const joinY = function (a) { return a.length > 1 ? a.slice(0, -1).join(', ') + ' y ' + a[a.length - 1] : (a[0] || ''); };
   function guard() { return P().loggedIn ? null : { redirect: '/panel/login' }; }
-  function reviewCount() { return P().requests.filter(function (r) { return r.estado === 'pendiente' && r.revisor === P().persona; }).length; }
-  function defaultApprover() { const o = P().equipo.filter(function (p) { return p.id !== P().persona; }); return o.length ? o[0].id : ''; }
   function usersOf(emp) { return [Object.assign({ id: 'principal', principal: true }, emp.user)].concat(emp.empleados || []); }
-  function empEstado(emp) {
-    if (emp.estado === 'pendiente_alta') return badge('Alta en aprobación', 'pending');
-    if (emp.estado === 'rechazada') return badge('Alta rechazada', 'alert');
-    return C.pendingReqs(emp.id).length ? badge('En aprobación', 'pending') : '';
+  function others() { return P().equipo.filter(function (p) { return p.id !== P().persona; }); }
+  function avisados() { return joinY(others().map(function (p) { return p.nombre.split(' ')[0]; })); }
+
+  /* ---------- registro y novedades ---------- */
+  function seenList() { const s = P().seen || (P().seen = {}); return s[P().persona] || (s[P().persona] = []); }
+  function unseen() { const seen = seenList(); return P().log.filter(function (l) { return l.actor !== P().persona && seen.indexOf(l.id) < 0; }); }
+  function addLog(entry) {
+    entry.id = C.uid('l'); entry.fecha = entry.fecha || C.nowISO(); entry.actor = entry.actor || P().persona;
+    P().log.unshift(entry); seenList().push(entry.id);
+    return entry;
   }
-  const clientVia = function (emp) { return 'correo y WhatsApp' + (emp && emp.user && emp.user.email ? ' (' + emp.user.email + ' · ' + (emp.user.wa || '—') + ')' : ''); };
+  /* Aplica el cambio al instante, guarda el "antes" y avisa al equipo */
+  function commit(empId, ops, texto) {
+    const emp = C.empresa(empId);
+    const full = C.withBefore(emp, ops);
+    C.applyOps(emp, full);
+    emp.actualizado = C.nowISO();
+    addLog({ accion: 'cambio', empresaId: empId, texto: texto, ops: full });
+    C.save();
+    C.toast('Guardado · avisamos a ' + avisados());
+  }
 
   /* ---------- Layout del panel ---------- */
   const NAV = [
     { id: 'empresas', label: 'Empresas', icon: 'building', href: '#/panel/empresas' },
     { id: 'nueva', label: 'Nueva cuenta', short: 'Nueva', icon: 'plus', href: '#/panel/nueva/contacto' },
-    { id: 'aprobaciones', label: 'Aprobaciones', short: 'Aprobar', icon: 'inbox', href: '#/panel/aprobaciones' },
     { id: 'registro', label: 'Registro de cambios', short: 'Registro', icon: 'history', href: '#/panel/registro' },
     { id: 'equipo', label: 'Equipo', icon: 'users', href: '#/panel/equipo' }
   ];
   C.layouts.panel = function (page) {
     const me = C.persona();
-    const n = reviewCount();
+    const n = unseen().length;
     const nav = function (cls) {
       return NAV.map(function (i) {
         const on = page.nav === i.id;
-        const count = i.id === 'aprobaciones' && n ? '<span class="pn-count">' + n + '</span>' : '';
+        const count = i.id === 'registro' && n ? '<span class="pn-count">' + n + '</span>' : '';
         return '<a class="' + cls + (on ? ' is-active' : '') + '" href="' + i.href + '"' + (on ? ' aria-current="page"' : '') + '>' + C.icon(i.icon, 19) +
           '<span>' + (cls === 'pn-tab' ? (i.short || i.label) : i.label) + '</span>' + count + '</a>';
       }).join('');
@@ -57,18 +71,15 @@
         P().equipo.map(function (p) {
           return '<button type="button" class="pn-menu-item' + (p.id === me.id ? ' is-on' : '') + '" role="menuitem" data-action="pnPersona" data-arg="' + p.id + '">' + avatar(p.nombre) + '<span><strong>' + e(p.nombre) + '</strong><span class="muted small">' + e(p.rol) + '</span></span></button>';
         }).join('') +
-        '<hr class="divider"><a class="pn-menu-item" href="#/acceso" role="menuitem">' + C.icon('store', 18) + '<span>Ir a la tienda (cliente)</span></a>' +
-        '<button type="button" class="pn-menu-item" role="menuitem" data-action="pnLogout">' + C.icon('logout', 18) + '<span>Cerrar sesión</span></button></div>'
+        '<hr class="divider"><button type="button" class="pn-menu-item" role="menuitem" data-action="pnLogout">' + C.icon('logout', 18) + '<span>Cerrar sesión</span></button></div>'
       : '';
     return '<div class="pn">' +
       '<header class="pn-top"><a class="pn-brand" href="#/panel/empresas"><img src="assets/logo-cooltiva.png" alt="Cooltiva" width="110" height="31"><span class="pn-brand-t">Panel de vendedores</span></a>' +
-      '<div class="pn-top-right"><a class="pn-bell" href="#/panel/aprobaciones" aria-label="Aprobaciones por revisar: ' + n + '">' + C.icon('bell', 20) + (n ? '<span class="pn-dot">' + n + '</span>' : '') + '</a>' +
+      '<div class="pn-top-right"><a class="pn-bell" href="#/panel/registro" aria-label="Cambios nuevos del equipo: ' + n + '">' + C.icon('bell', 20) + (n ? '<span class="pn-dot">' + n + '</span>' : '') + '</a>' +
       '<button type="button" class="pn-persona" data-action="pnPersonaMenu" aria-haspopup="menu" aria-expanded="' + !!C.ui.personaMenu + '" aria-label="Perfil: ' + e(me.nombre) + '">' + avatar(me.nombre) +
       '<span class="pn-persona-t"><strong>' + e(me.nombre) + '</strong><span>' + e(me.rol) + '</span></span>' + C.icon('chevDown', 16) + '</button>' + menu + '</div></header>' +
-      '<div class="pn-body"><aside class="pn-side" aria-label="Navegación del panel"><nav class="pn-nav">' + nav('pn-link') + '</nav>' +
-      '<div class="pn-side-foot"><a class="pn-link" href="#/acceso">' + C.icon('store', 19) + '<span>Ver tienda del cliente</span></a></div></aside>' +
-      '<main class="pn-main' + (page.actionBar ? ' has-bar' : '') + '" id="main"><div class="pn-content' + (page.narrow ? ' is-narrow' : '') + '">' + page.html + '</div></main></div>' +
-      (page.actionBar ? '<div class="pn-actionbar">' + page.actionBar + '</div>' : '') +
+      '<div class="pn-body"><aside class="pn-side" aria-label="Navegación del panel"><nav class="pn-nav">' + nav('pn-link') + '</nav></aside>' +
+      '<main class="pn-main" id="main"><div class="pn-content' + (page.narrow ? ' is-narrow' : '') + '">' + page.html + '</div></main></div>' +
       '<nav class="pn-tabbar" aria-label="Navegación del panel">' + nav('pn-tab') + '</nav></div>';
   };
   A.pnPersonaMenu = function () { C.ui.personaMenu = !C.ui.personaMenu; C.set(); };
@@ -88,13 +99,12 @@
       layout: 'bare', title: 'Panel de vendedores',
       html: '<div class="pn-login"><section class="pn-login-card"><img src="assets/logo-cooltiva.png" alt="Cooltiva" width="130" height="37">' +
         '<p class="eyebrow mt-16">Cooltiva · uso interno</p><h1 class="h1">Panel de vendedores</h1>' +
-        '<p class="muted">Crea y administra cuentas de clientes. Los cambios los aprueba otra persona.</p>' +
+        '<p class="muted">Crea y administra cuentas de clientes.</p>' +
         '<div class="stack mt-24">' +
         C.field({ label: 'Correo de Cooltiva', bind: 'ui.draft.email', type: 'email', placeholder: 'nombre@cooltiva.bo', autocomplete: 'username' }) +
         C.field({ label: 'Contraseña', bind: 'ui.draft.pass', type: 'password', autocomplete: 'current-password' }) +
         C.selectField({ label: 'Perfil (solo para el demo)', bind: 'ui.draft.persona', options: P().equipo.map(function (p) { return { value: p.id, label: p.nombre + ' · ' + p.rol }; }) }) +
-        C.btn('Entrar al panel', { primary: true, block: true, action: 'pnLogin' }) + '</div>' +
-        '<a class="link mt-16 pn-login-back" href="#/acceso">Volver a la tienda</a></section></div>'
+        C.btn('Entrar al panel', { primary: true, block: true, action: 'pnLogin' }) + '</div></section></div>'
     };
   });
   A.pnLogin = function () {
@@ -107,16 +117,17 @@
   };
 
   /* ======================= EMPRESAS (lista mínima) ======================= */
-  function filteredEmpresas() {
-    const q = (C.ui.draft.q || '').toLowerCase().trim();
-    return Object.keys(C.S.empresas).map(function (k) { return C.S.empresas[k]; }).filter(function (emp) {
-      if (!q) return true;
-      const hay = [emp.empresa, emp.formaJuridica.razon, emp.formaJuridica.nit].concat(usersOf(emp).map(function (u) { return fullName(u) + ' ' + u.email; })).join(' ').toLowerCase();
-      return hay.indexOf(q) > -1;
-    }).sort(function (a, b) { return (b.actualizado || '').localeCompare(a.actualizado || ''); });
+  function activas() { return Object.keys(C.S.empresas).map(function (k) { return C.S.empresas[k]; }).filter(function (x) { return x.estado !== 'baja'; }); }
+  function empBadge(emp) {
+    const nuevos = unseen().filter(function (l) { return l.empresaId === emp.id; }).length;
+    return nuevos ? badge('Cambios nuevos', 'draft') : '';
   }
   function empresaList() {
-    const list = filteredEmpresas();
+    const q = (C.ui.draft.q || '').toLowerCase().trim();
+    const list = activas().filter(function (emp) {
+      if (!q) return true;
+      return [emp.empresa, emp.formaJuridica.razon, emp.formaJuridica.nit].concat(usersOf(emp).map(function (u) { return fullName(u) + ' ' + u.email; })).join(' ').toLowerCase().indexOf(q) > -1;
+    }).sort(function (a, b) { return (b.actualizado || '').localeCompare(a.actualizado || ''); });
     if (!list.length) return '<div class="empty"><p class="h3">No hay empresas que coincidan</p></div>';
     return list.map(function (emp) {
       const rows = usersOf(emp).map(function (u) {
@@ -124,7 +135,7 @@
           '<td data-label="Rol">' + e(u.rol || '—') + '</td><td data-label="Correo">' + e(u.email || '—') + '</td><td data-label="WhatsApp">' + e(u.wa || '—') + '</td></tr>';
       }).join('');
       return '<section class="pn-emp card"><header class="pn-emp-head" data-action="pnGo" data-arg="/panel/empresa/' + emp.id + '/usuarios" role="link" tabindex="0">' +
-        '<div class="pn-emp-id">' + avatar(emp.empresa, 'is-sq') + '<h2 class="h3">' + e(emp.empresa) + '</h2>' + empEstado(emp) + '</div>' +
+        '<div class="pn-emp-id">' + avatar(emp.empresa, 'is-sq') + '<h2 class="h3">' + e(emp.empresa) + '</h2>' + empBadge(emp) + '</div>' +
         '<span class="pn-emp-chev" aria-hidden="true">' + C.icon('chevRight', 20) + '</span></header>' +
         '<table class="pn-table pn-users"><thead><tr><th>Usuario</th><th>Rol</th><th>Correo</th><th>WhatsApp</th></tr></thead><tbody>' + rows + '</tbody></table></section>';
     }).join('');
@@ -135,136 +146,63 @@
     const g = guard(); if (g) return g;
     const N = P().nueva;
     const draftBanner = N.maxStep > 0
-      ? '<div class="pn-banner"><span>' + C.icon('edit', 18) + '<span>Alta en borrador: <strong>' + e(N.contacto.empresa || 'Sin nombre') + '</strong></span></span><a class="btn btn-sm" href="#/panel/nueva/' + NUEVA_STEPS[Math.min(N.maxStep, NUEVA_STEPS.length - 1)] + '">Continuar</a></div>' : '';
+      ? '<div class="pn-banner"><span>' + C.icon('edit', 18) + '<span>Cuenta a medio crear: <strong>' + e(N.contacto.empresa || 'Sin nombre') + '</strong></span></span><a class="btn btn-sm" href="#/panel/nueva/' + NUEVA_STEPS[Math.min(N.maxStep, NUEVA_STEPS.length - 1)] + '">Continuar</a></div>' : '';
     const html = '<div class="pn-head"><h1 class="h1">Empresas</h1><a class="btn btn-primary" href="#/panel/nueva/contacto">' + C.icon('plus', 18) + '<span>Nueva cuenta</span></a></div>' + draftBanner +
       '<label class="pn-search">' + C.icon('search', 18) + '<span class="sr-only">Buscar</span><input class="input" type="search" placeholder="Buscar empresa o usuario" data-bind="ui.draft.q" data-live="pnFilter" value="' + e(C.ui.draft.q || '') + '"></label>' +
       '<div id="pn-list" class="pn-list">' + empresaList() + '</div>';
     return { layout: 'panel', nav: 'empresas', title: 'Empresas', html: html };
   });
-  /* Tocar un usuario abre su información lista para editar */
+  /* Tocar un usuario abre su ficha con el modal de edición */
   A.pnGoUser = function (el) {
-    const a = el.dataset.arg.split('|'), id = a[0], uid = a[1];
-    const v = C.empView(id), u = usersOf(v).find(function (x) { return x.id === uid; });
-    const locked = C.S.empresas[id].estado !== 'activa' || C.pendingKeys(id)[uid === 'principal' ? 'path:user' : 'empleados:' + uid];
-    C.goWith('/panel/empresa/' + id + '/usuarios', locked || !u ? {} : { editing: { type: 'user', id: uid }, draft: C.clone(u) });
+    const a = el.dataset.arg.split('|');
+    C._after = function () { openModal('user', a[1], { empId: a[0] }); };
+    C.go('/panel/empresa/' + a[0] + '/usuarios');
   };
 
   /* ======================= FICHA DE EMPRESA ======================= */
-  const TABS = [['usuarios', 'Usuarios'], ['legal', 'Datos legales'], ['sucursales', 'Sucursales'], ['recepcionistas', 'Recepcionistas'], ['credito', 'Crédito y contrato'], ['pedidos', 'Pedidos'], ['historial', 'Historial']];
-
-  function marker(empId, key) {
-    const pk = C.pendingKeys(empId), dk = C.draftKeys(empId);
-    if (pk[key]) return { pending: pk[key], html: badge('En aprobación', 'pending') };
-    if (dk[key]) return { draft: dk[key], html: badge(dk[key] === 'add' ? 'Nuevo' : (dk[key] === 'remove' ? 'Se eliminará' : 'Editado'), 'draft') };
-    return {};
-  }
-  function actions(m, locked, editArg, delArg) {
-    if (locked) return '';
-    if (m.pending) return '<span class="muted small">Bloqueado</span>';
-    return C.link('Editar', 'pnEdit', editArg) + (delArg ? C.link('Eliminar', 'pnDelete', delArg) : '');
-  }
-  function removedRows(empId, coll, render) {
-    const dk = C.draftKeys(empId), base = C.empresa(empId);
-    return base[coll].filter(function (x) { return dk[coll + ':' + x.id] === 'remove'; }).map(render).join('');
-  }
-  function formCard(title, body, saveArg) {
-    return '<section class="card card-strong card-pad form-card reveal"><h3 class="h3">' + e(title) + '</h3><div class="mt-16">' + body + '</div>' +
-      '<div class="form-actions">' + C.btn('Cancelar', { action: 'pnCancel' }) + C.btn('Guardar en el borrador', { primary: true, action: 'pnSave', arg: saveArg }) + '</div></section>';
-  }
-  const isEditing = function (type, id) { return C.ui.editing && C.ui.editing.type === type && C.ui.editing.id === id; };
+  const TABS = [['usuarios', 'Usuarios'], ['legal', 'Datos legales'], ['sucursales', 'Sucursales'], ['recepcionistas', 'Recepcionistas'], ['credito', 'Crédito'], ['pedidos', 'Pedidos'], ['historial', 'Historial']];
   const secHead = function (title, btn) { return '<div class="pn-sec-head"><h2 class="h2">' + title + '</h2>' + (btn || '') + '</div>'; };
+  const editDel = function (kind, id, canDelete) { return C.link('Editar', 'pmOpen', kind + ':' + id) + (canDelete ? C.link('Eliminar', 'pmAskDelete', kind + ':' + id) : ''); };
 
-  function userFields() {
-    return '<div class="form-grid">' +
-      C.field({ label: 'Nombre', bind: 'ui.draft.nombre' }) + C.field({ label: 'Apellido', bind: 'ui.draft.apellido' }) +
-      C.selectField({ label: 'Rol', bind: 'ui.draft.rol', placeholder: 'Elegir rol', options: C.ROLES.map(function (r) { return { value: r, label: r }; }) }) +
-      C.field({ label: 'WhatsApp', bind: 'ui.draft.wa', type: 'tel', placeholder: '+591 7000 0000' }) +
-      C.field({ label: 'Correo electrónico', bind: 'ui.draft.email', type: 'email', cls: 'span-2', placeholder: 'nombre@empresa.bo' }) + '</div>';
-  }
-  function tabUsuarios(id, v, locked) {
-    let html = secHead('Usuarios', locked ? '' : C.btn('+ Agregar usuario', { action: 'pnNew', arg: 'user', disabled: C.ui.creating === 'user' }));
-    if (C.ui.creating === 'user') html += formCard('Nuevo usuario', userFields(), 'user:new');
+  function tabUsuarios(id, v) {
     const rows = usersOf(v).map(function (u) {
-      const key = u.principal ? 'path:user' : 'empleados:' + u.id, m = marker(id, key);
-      if (isEditing('user', u.id)) return '<tr class="pn-tr-form"><td colspan="5">' + formCard(u.principal ? 'Contacto principal' : 'Editar usuario', userFields(), 'user:' + u.id) + '</td></tr>';
-      return '<tr' + (m.draft ? ' class="is-draft"' : '') + '><td data-label="Usuario"><span class="pn-user">' + avatar(fullName(u) || u.email, 'is-sm') + '<strong>' + e(fullName(u) || 'Sin nombre') + '</strong>' + (u.principal ? badge('Principal', 'neutral') : '') + '</span>' + (m.html || '') + '</td>' +
+      return '<tr><td data-label="Usuario"><span class="pn-user">' + avatar(fullName(u) || u.email, 'is-sm') + '<strong>' + e(fullName(u) || 'Sin nombre') + '</strong>' + (u.principal ? badge('Principal', 'neutral') : '') + '</span></td>' +
         '<td data-label="Rol">' + e(u.rol || '—') + '</td><td data-label="Correo">' + e(u.email || '—') + '</td><td data-label="WhatsApp">' + e(u.wa || '—') + '</td>' +
-        '<td class="pn-td-actions">' + actions(m, locked, 'user:' + u.id, u.principal ? null : 'empleados:' + u.id) + '</td></tr>';
-    }).join('') + removedRows(id, 'empleados', function (u) {
-      return '<tr class="is-removed"><td data-label="Usuario">' + e(fullName(u) || u.email) + ' ' + badge('Se eliminará', 'draft') + '</td><td>' + e(u.rol || '') + '</td><td>' + e(u.email) + '</td><td>' + e(u.wa) + '</td><td class="pn-td-actions">' + C.link('Deshacer', 'pnUndo', 'empleados:' + u.id) + '</td></tr>';
-    });
-    return html + '<table class="pn-table"><thead><tr><th>Usuario</th><th>Rol</th><th>Correo</th><th>WhatsApp</th><th><span class="sr-only">Acciones</span></th></tr></thead><tbody>' + rows + '</tbody></table>';
+        '<td class="pn-td-actions">' + editDel('user', u.id, !u.principal) + '</td></tr>';
+    }).join('');
+    return secHead('Usuarios', C.btn('+ Agregar usuario', { action: 'pmOpen', arg: 'user:new' })) +
+      '<table class="pn-table"><thead><tr><th>Usuario</th><th>Rol</th><th>Correo</th><th>WhatsApp</th><th><span class="sr-only">Acciones</span></th></tr></thead><tbody>' + rows + '</tbody></table>';
   }
-
   function legalView(v) {
     const fj = v.formaJuridica, f = C.FORMAS_JURIDICAS.find(function (x) { return x.id === fj.tipo; });
     const rows = [['Nombre comercial', v.empresa], ['Forma jurídica', f ? f.label : '—']].concat(fj.tipo === 'natural' ? [['CI', fj.ci]] : [['Razón social', fj.razon], ['NIT', fj.nit], ['Matrícula de comercio', fj.matricula]]);
     return '<dl class="pn-dl">' + rows.map(function (r) { return '<div><dt>' + r[0] + '</dt><dd>' + e(r[1] || '—') + '</dd></div>'; }).join('') + '</dl>';
   }
-  function legalFields() {
-    const d = C.ui.draft;
-    const cards = C.FORMAS_JURIDICAS.map(function (f) { return C.choice({ label: f.label, selected: d.tipo === f.id, action: 'pnFj', arg: f.id }); }).join('');
-    return '<div class="stack">' + C.field({ label: 'Nombre comercial', bind: 'ui.draft.empresa' }) +
-      '<div class="field' + C.errCls('tipo') + '"><span class="label">Forma jurídica</span><div class="choice-grid cols-3">' + cards + '</div>' + C.err('tipo') + '</div>' +
-      (d.tipo === 'natural' ? C.field({ label: 'CI', bind: 'ui.draft.ci' })
-        : '<div class="form-grid">' + C.field({ label: 'Razón social', bind: 'ui.draft.razon', cls: 'span-2' }) + C.field({ label: 'NIT', bind: 'ui.draft.nit', inputmode: 'numeric' }) + C.field({ label: 'Matrícula de comercio', bind: 'ui.draft.matricula' }) + '</div>') + '</div>';
+  function tabLegal(id, v) {
+    return secHead('Datos legales', C.btn('Editar', { action: 'pmOpen', arg: 'legal:x', icon: 'edit' })) + '<div class="card card-pad">' + legalView(v) + '</div>';
   }
-  function tabLegal(id, v, locked) {
-    const m1 = marker(id, 'path:formaJuridica'), m2 = marker(id, 'path:empresa');
-    const head = secHead('Datos legales', locked || m1.pending || m2.pending || isEditing('legal', 'x') ? '' : C.btn('Editar', { action: 'pnEdit', arg: 'legal:x', icon: 'edit' }));
-    if (isEditing('legal', 'x')) return head + formCard('Editar datos legales', legalFields(), 'legal:x');
-    return head + '<div class="card card-pad">' + (m1.html || m2.html || '') + legalView(v) + '</div>';
+  function tabSucursales(id, v) {
+    return secHead('Sucursales', C.btn('+ Agregar sucursal', { action: 'pmOpen', arg: 'suc:new' })) +
+      '<div class="pn-grid">' + v.sucursales.map(function (s) {
+        const n = v.recepcionistas.filter(function (r) { return r.sucursalId === s.id; }).length;
+        return '<article class="card pn-suc"><div class="pn-suc-map">' + C.map({ small: true, pin: s.pin }) + '</div>' +
+          '<div class="pn-suc-body"><strong>' + e(s.dir) + '</strong><span class="muted">' + e(s.ciudad) + '</span><span class="muted small">' + n + (n === 1 ? ' recepcionista' : ' recepcionistas') + '</span>' +
+          '<div class="item-actions">' + editDel('suc', s.id, true) + '</div></div></article>';
+      }).join('') + '</div>' + (v.sucursales.length ? '' : '<div class="empty"><p class="h3">Sin sucursales</p></div>');
   }
-
-  function sucFields() {
-    return C.map({ interactive: true, action: 'pnMap', pin: C.ui.draft.pin }) + '<div class="form-grid mt-16">' +
-      C.field({ label: 'Dirección', bind: 'ui.draft.dir', placeholder: 'Ej. Av. 6 de Agosto 1234' }) + C.field({ label: 'Ciudad', bind: 'ui.draft.ciudad', placeholder: 'Ej. La Paz' }) + '</div>';
-  }
-  A.pnMap = function (el, ev) {
-    const g = C.geocodeFromClick(el, ev);
-    C.ui.draft.pin = g.pin; C.ui.draft.dir = g.dir; C.ui.draft.ciudad = g.ciudad;
-    delete C.ui.errors['ui.draft.dir']; delete C.ui.errors['ui.draft.ciudad'];
-    C.set();
-  };
-  function tabSucursales(id, v, locked) {
-    let html = secHead('Sucursales', locked ? '' : C.btn('+ Agregar sucursal', { action: 'pnNew', arg: 'suc', disabled: C.ui.creating === 'suc' }));
-    if (C.ui.creating === 'suc') html += formCard('Nueva sucursal', sucFields(), 'suc:new');
-    html += '<div class="pn-grid">' + v.sucursales.map(function (s) {
-      const m = marker(id, 'sucursales:' + s.id);
-      if (isEditing('suc', s.id)) return '<div class="pn-grid-full">' + formCard('Editar sucursal', sucFields(), 'suc:' + s.id) + '</div>';
-      return '<article class="card pn-suc' + (m.draft ? ' is-draft' : '') + '"><div class="pn-suc-map">' + C.map({ small: true, pin: s.pin }) + '</div>' +
-        '<div class="pn-suc-body"><strong>' + e(s.dir) + '</strong><span class="muted">' + e(s.ciudad) + '</span>' + (m.html || '') +
-        '<div class="item-actions">' + actions(m, locked, 'suc:' + s.id, 'sucursales:' + s.id) + '</div></div></article>';
-    }).join('') + removedRows(id, 'sucursales', function (s) {
-      return '<article class="card pn-suc is-removed"><div class="pn-suc-body"><strong>' + e(s.dir) + '</strong><span class="muted">' + e(s.ciudad) + '</span>' + badge('Se eliminará con sus recepcionistas', 'draft') +
-        '<div class="item-actions">' + C.link('Deshacer', 'pnUndo', 'sucursales:' + s.id) + '</div></div></article>';
-    }) + '</div>';
-    return html;
+  function tabRecepcionistas(id, v) {
+    if (!v.sucursales.length) return secHead('Recepcionistas') + '<div class="empty"><p class="h3">Primero agrega una sucursal</p></div>';
+    return secHead('Recepcionistas', C.btn('+ Agregar recepcionista', { action: 'pmOpen', arg: 'rec:new' })) +
+      v.sucursales.map(function (s) {
+        const rs = v.recepcionistas.filter(function (r) { return r.sucursalId === s.id; });
+        return '<section class="pn-group"><h3 class="pn-group-t">' + C.icon('pin', 16) + '<span>' + e(s.dir) + ' <span class="muted">· ' + e(s.ciudad) + '</span></span>' + C.link('+ Agregar aquí', 'pmOpen', 'rec:new:' + s.id) + '</h3>' +
+          (rs.length ? '<table class="pn-table"><tbody>' + rs.map(function (r) {
+            return '<tr><td data-label="Nombre"><strong>' + e(r.nombre) + '</strong></td><td data-label="Teléfono">' + e(r.tel || '—') + '</td><td class="pn-td-actions">' + editDel('rec', r.id, true) + '</td></tr>';
+          }).join('') + '</tbody></table>' : '<p class="pn-warn">' + C.icon('alert', 16) + ' Sin recepcionista: el cliente no podrá elegir quién recibe.</p>') + '</section>';
+      }).join('');
   }
 
-  function recFields(v) {
-    return '<div class="form-grid">' +
-      C.selectField({ label: 'Sucursal', bind: 'ui.draft.sucursalId', placeholder: 'Elegir sucursal', cls: 'span-2', options: v.sucursales.map(function (s) { return { value: s.id, label: C.sucLabel(s) }; }) }) +
-      C.field({ label: 'Nombre recepcionista', bind: 'ui.draft.nombre' }) + C.field({ label: 'Teléfono recepcionista', bind: 'ui.draft.tel', inputmode: 'tel' }) + '</div>';
-  }
-  function tabRecepcionistas(id, v, locked) {
-    let html = secHead('Recepcionistas', locked || !v.sucursales.length ? '' : C.btn('+ Agregar recepcionista', { action: 'pnNew', arg: 'rec', disabled: C.ui.creating === 'rec' }));
-    if (C.ui.creating === 'rec') html += formCard('Nuevo recepcionista', recFields(v), 'rec:new');
-    html += v.sucursales.map(function (s) {
-      const rs = v.recepcionistas.filter(function (r) { return r.sucursalId === s.id; });
-      return '<section class="pn-group"><h3 class="pn-group-t">' + C.icon('pin', 16) + e(s.dir) + ' <span class="muted">· ' + e(s.ciudad) + '</span></h3>' +
-        (rs.length ? '<table class="pn-table"><tbody>' + rs.map(function (r) {
-          const m = marker(id, 'recepcionistas:' + r.id);
-          if (isEditing('rec', r.id)) return '<tr class="pn-tr-form"><td colspan="3">' + formCard('Editar recepcionista', recFields(v), 'rec:' + r.id) + '</td></tr>';
-          return '<tr' + (m.draft ? ' class="is-draft"' : '') + '><td data-label="Nombre"><strong>' + e(r.nombre) + '</strong>' + (m.html || '') + '</td><td data-label="Teléfono">' + e(r.tel || '—') + '</td><td class="pn-td-actions">' + actions(m, locked, 'rec:' + r.id, 'recepcionistas:' + r.id) + '</td></tr>';
-        }).join('') + '</tbody></table>' : '<p class="pn-warn">' + C.icon('alert', 16) + ' Sin recepcionista: el cliente no podrá elegir quién recibe.</p>') + '</section>';
-    }).join('') + removedRows(id, 'recepcionistas', function (r) {
-      return '<p class="is-removed">' + e(r.nombre) + ' ' + badge('Se eliminará', 'draft') + ' ' + C.link('Deshacer', 'pnUndo', 'recepcionistas:' + r.id) + '</p>';
-    });
-    return html;
-  }
-
-  /* Contrato generado con las condiciones */
+  /* Contrato (solo lectura en el panel) */
   C.contratoPanel = function (o) {
     const ident = o.tipo === 'natural' ? 'con CI ' + (o.ci || '—') : (o.razon || o.empresa || '—') + ', con NIT ' + (o.nit || '—');
     const v = function (x) { return '<mark>' + e(x) + '</mark>'; };
@@ -279,39 +217,29 @@
       return '<li class="' + (f.length ? 'is-ok' : 'is-missing') + '"><span class="pn-doc-mark" aria-hidden="true">' + C.icon(f.length ? 'check' : 'x', 13) + '</span><span><strong>' + C.DOC_LABELS[k] + '</strong><span class="muted small">' + (f.length ? e(f.map(function (x) { return x.name; }).join(', ')) : 'Falta') + '</span></span></li>';
     }).join('') + '</ul>';
   }
-  function creditFields() {
-    const d = C.ui.draft;
-    return '<div class="stack">' +
-      '<div class="field"><span class="label">Estado</span>' + C.segmented({ value: d.estado, action: 'pnCredEstado', options: [{ value: 'aprobado', label: 'Crédito aprobado' }, { value: 'no', label: 'Sin crédito' }] }) + '</div>' +
-      (d.estado === 'aprobado' ? '<div class="form-grid">' + C.field({ label: 'Línea aprobada (Bs)', bind: 'ui.draft.linea', numeric: true, placeholder: 'Ej. 10000' }) +
-        C.selectField({ label: 'Plazo de pago', bind: 'ui.draft.plazo', options: [15, 30, 45, 60].map(function (p) { return { value: String(p), label: p + ' días' }; }) }) + '</div>' +
-        '<div><p class="upload-label">Documentos del cliente</p><div class="docs pn-docs-up">' +
-        C.CREDITO_DOCS.map(function (doc) { return C.uploadSlot({ path: 'ui.draft.docs.' + doc.key, label: doc.label, multiple: doc.multiple, max: doc.max, cta: doc.cta, sub: doc.sub }); }).join('') +
-        C.uploadSlot({ path: 'ui.draft.docs.anverso', label: 'Carnet · anverso', cta: 'Anverso', sub: 'Subir foto', accept: 'image/*,.pdf' }) +
-        C.uploadSlot({ path: 'ui.draft.docs.reverso', label: 'Carnet · reverso', cta: 'Reverso', sub: 'Subir foto', accept: 'image/*,.pdf' }) + '</div></div>' : '') + '</div>';
-  }
-  function tabCredito(id, v, locked) {
-    const c = v.credito, m = marker(id, 'path:credito');
-    const aprobado = c.estado === 'aprobado';
-    const head = secHead('Crédito y contrato', locked || m.pending || isEditing('cred', 'x') ? '' : C.btn(aprobado ? 'Editar condiciones' : 'Crear contrato de crédito', { action: 'pnEdit', arg: 'cred:x', icon: aprobado ? 'edit' : 'fileText', primary: !aprobado }));
-    if (isEditing('cred', 'x')) return head + formCard(aprobado ? 'Editar condiciones del crédito' : 'Crear contrato de crédito', creditFields(), 'cred:x');
-    const solicitado = c.estado === 'solicitado' ? '<div class="pn-banner">' + C.icon('alert', 18) + '<span>El cliente pidió crédito desde la web. Revisa sus documentos y crea el contrato.</span></div>' : '';
-    return head + solicitado + (m.html ? '<div class="mt-8">' + m.html + '</div>' : '') +
-      '<div class="pn-credit"><div class="stack">' +
-      '<section class="card card-pad"><div class="row-between"><h3 class="h3">Condiciones</h3>' + badge(C.CREDITO_ESTADOS[c.estado], aprobado ? 'ok' : 'neutral') + '</div>' +
-      '<dl class="pn-kpis"><div><dt>Línea</dt><dd>' + (aprobado ? C.bs(c.linea) : '—') + '</dd></div><div><dt>Plazo</dt><dd>' + c.plazo + ' días</dd></div>' +
-      '<div><dt>Disponible</dt><dd>' + (aprobado ? C.bs(c.linea - (c.usado || 0)) : '—') + '</dd></div></dl></section>' +
-      '<section class="card card-pad"><h3 class="h3">Documentos</h3>' + docsList(c.docs) + '</section></div>' +
-      '<section class="card card-pad pn-contract"><div class="row-between"><h3 class="h3">Contrato</h3>' + badge(aprobado ? 'Vigente' : 'Sin contrato', aprobado ? 'ok' : 'neutral') + '</div>' +
-      (aprobado ? '<div class="contract-body contract-body-sm">' + C.contratoPanel({ tipo: v.formaJuridica.tipo, ci: v.formaJuridica.ci, razon: v.formaJuridica.razon, nit: v.formaJuridica.nit, empresa: v.empresa, linea: c.linea, plazo: c.plazo }) + '</div>' +
-        C.btn('Descargar contrato', { block: true, icon: 'download', action: 'downloadContract' })
-        : '<p class="muted mt-8">Esta empresa no tiene contrato de crédito.</p>') + '</section></div>';
+  function tabCredito(id, v) {
+    const c = v.credito;
+    const note = '<p class="hint mt-8">El crédito lo solicita el cliente desde su celular: sube sus documentos y firma electrónicamente. Tú no puedes crearlo por él.</p>';
+    if (c.estado === 'aprobado') {
+      return secHead('Crédito') + '<div class="pn-credit"><section class="card card-pad"><div class="row-between"><h3 class="h3">Condiciones</h3>' + badge('Aprobado', 'ok') + '</div>' +
+        '<dl class="pn-kpis"><div><dt>Línea</dt><dd>' + C.bs(c.linea) + '</dd></div><div><dt>Plazo</dt><dd>' + c.plazo + ' días</dd></div><div><dt>Disponible</dt><dd>' + C.bs(c.linea - (c.usado || 0)) + '</dd></div></dl></section>' +
+        '<section class="card card-pad pn-contract"><div class="row-between"><h3 class="h3">Contrato</h3>' + badge('Firmado por el cliente', 'neutral') + '</div><div class="contract-body contract-body-sm">' +
+        C.contratoPanel({ tipo: v.formaJuridica.tipo, ci: v.formaJuridica.ci, razon: v.formaJuridica.razon, nit: v.formaJuridica.nit, empresa: v.empresa, linea: c.linea, plazo: c.plazo }) + '</div>' +
+        C.btn('Descargar contrato', { block: true, icon: 'download', action: 'downloadContract' }) + '</section></div>';
+    }
+    if (c.estado === 'solicitado') {
+      return secHead('Crédito') + '<section class="card card-pad"><div class="row-between"><h3 class="h3">Solicitud del cliente</h3>' + badge('En revisión', 'pending') + '</div>' +
+        '<p class="muted mt-8">Enviada desde su celular el ' + fmtDT(c.solicitado) + ', con firma electrónica.</p>' + docsList(c.docs) + '</section>' + note;
+    }
+    const inv = c.invitado;
+    return secHead('Crédito') + '<section class="card card-pad pn-credit-empty"><h3 class="h3">Sin crédito</h3>' +
+      (inv ? '<p class="muted mt-8">' + C.icon('check', 14) + ' Le pedimos que lo solicite el ' + fmtDT(inv.fecha) + ' (' + e(inv.por) + '), por correo y WhatsApp.</p>' : '<p class="muted mt-8">El cliente todavía no solicitó Crédito Cooltiva.</p>') +
+      '<div class="mt-16">' + C.btn(inv ? 'Volver a pedírselo' : 'Pedir al cliente que solicite su crédito', { primary: !inv, icon: 'msg', action: 'pmOpen', arg: 'invite:x' }) + '</div></section>' + note;
   }
 
   function tabPedidos(id, v) {
     const list = v.pedidos.slice().sort(function (a, b) { return b.creado.localeCompare(a.creado); });
-    const btn = v.estado === 'activa' ? C.btn('Hacer pedido para el cliente', { primary: true, icon: 'store', action: 'pnActAs', arg: id }) : '';
-    const head = secHead('Pedidos', btn);
+    const head = secHead('Pedidos', C.btn('Hacer pedido para el cliente', { primary: true, icon: 'store', action: 'pnActAs', arg: id }));
     if (!list.length) return head + '<div class="empty"><p class="h3">Sin pedidos todavía</p></div>';
     return head + '<table class="pn-table"><thead><tr><th>Pedido</th><th>Entrega</th><th>Pago</th><th class="ta-r">Total</th></tr></thead><tbody>' +
       list.map(function (o) {
@@ -319,75 +247,127 @@
           '<td data-label="Entrega">' + C.fmtDay(o.entregaFecha) + ' · ' + e(o.franja) + '</td><td data-label="Pago">' + e(o.pago) + '</td><td data-label="Total" class="ta-r"><strong>' + C.bs(o.total) + '</strong></td></tr>';
       }).join('') + '</tbody></table>';
   }
-
   function tabHistorial(id) {
-    return secHead('Historial') + logTable(P().log.filter(function (l) { return l.empresaId === id; }), false);
-  }
-
-  const ACCION = { envio: 'Envío', aprobacion: 'Aprobación', rechazo: 'Rechazo', notificacion: 'Aviso al cliente', pedido: 'Pedido', alta: 'Alta', cancelacion: 'Cancelación' };
-  function logTable(entries, withEmpresa) {
-    if (!entries.length) return '<p class="muted">Sin movimientos.</p>';
-    return '<table class="pn-table pn-log"><thead><tr><th>Fecha</th><th>Persona</th>' + (withEmpresa ? '<th>Empresa</th>' : '') + '<th>Qué pasó</th></tr></thead><tbody>' +
-      entries.map(function (l) {
-        const emp = C.empresa(l.empresaId);
-        return '<tr><td data-label="Fecha" class="nowrap">' + fmtDT(l.fecha) + '</td><td data-label="Persona">' + e(C.persona(l.actor).nombre) + '</td>' +
-          (withEmpresa ? '<td data-label="Empresa">' + (emp ? '<a href="#/panel/empresa/' + emp.id + '/historial">' + e(emp.empresa) + '</a>' : '—') + '</td>' : '') +
-          '<td data-label="Qué pasó">' + e(l.texto) + (l.req ? ' <a class="link" href="#/panel/solicitud/' + l.req + '">#' + l.req + '</a>' : '') + '</td></tr>';
-      }).join('') + '</tbody></table>';
+    const list = P().log.filter(function (l) { return l.empresaId === id; });
+    return secHead('Historial') + (list.length ? '<div class="pn-feed">' + list.map(function (l) { return entryCard(l, false, {}); }).join('') + '</div>' : '<p class="muted">Sin movimientos.</p>');
   }
 
   C.route('/panel/empresa/:id/:tab', function (params) {
     const g = guard(); if (g) return g;
-    const base = C.empresa(params.id);
-    if (!base) return { redirect: '/panel/empresas' };
-    if (params.tab === 'revisar') return revisarPage(params.id);
-    const v = C.empView(params.id);
+    const v = C.empresa(params.id);
+    if (!v) return { redirect: '/panel/empresas' };
     const tab = TABS.some(function (t) { return t[0] === params.tab; }) ? params.tab : 'usuarios';
-    const locked = base.estado !== 'activa';
     const tabs = TABS.map(function (t) {
       const on = t[0] === tab;
       return '<a class="pn-tabs-a' + (on ? ' is-active' : '') + '" href="#/panel/empresa/' + params.id + '/' + t[0] + '"' + (on ? ' aria-current="page"' : '') + '>' + t[1] + '</a>';
     }).join('');
-    let banners = C.pendingReqs(params.id).map(function (r) {
-      return '<div class="pn-banner is-pending">' + C.icon('clock', 18) + '<span>Esperando la aprobación de <strong>' + e(C.persona(r.revisor).nombre) + '</strong>. Los datos involucrados quedan bloqueados.</span><a class="btn btn-sm" href="#/panel/solicitud/' + r.id + '">Ver</a></div>';
-    }).join('');
-    if (base.estado === 'rechazada') banners += '<div class="pn-banner is-alert">' + C.icon('alert', 18) + '<span>El alta fue rechazada. Mira el motivo en Historial.</span></div>';
-    const body = { usuarios: tabUsuarios, legal: tabLegal, sucursales: tabSucursales, recepcionistas: tabRecepcionistas, credito: tabCredito, pedidos: tabPedidos, historial: tabHistorial }[tab](params.id, v, locked);
-    const n = C.draftOps(params.id).length;
-    const html = '<nav class="pn-crumbs" aria-label="Ruta"><a href="#/panel/empresas">' + C.icon('arrowLeft', 16) + ' Empresas</a></nav>' +
-      '<header class="pn-emp-hero"><div class="pn-emp-id">' + avatar(v.empresa, 'is-sq is-lg') + '<h1 class="h1">' + e(v.empresa) + '</h1>' + empEstado(base) + '</div>' +
-      (base.estado === 'activa' ? '<div class="pn-hero-actions">' + C.btn('Hacer pedido', { icon: 'store', action: 'pnActAs', arg: params.id }) + '</div>' : '') + '</header>' +
-      banners + '<nav class="pn-tabs" aria-label="Secciones de la empresa">' + tabs + '</nav><div class="pn-tab-body">' + body + '</div>';
-    const bar = n ? '<div class="pn-actionbar-in"><span class="pn-ab-t"><span class="pn-ab-dot" aria-hidden="true"></span><strong>' + n + (n === 1 ? ' cambio' : ' cambios') + ' sin enviar</strong></span>' +
-      '<span class="pn-ab-actions">' + C.btn('Descartar', { action: 'pnDiscard', arg: params.id, sm: true }) + '<a class="btn btn-primary btn-sm" href="#/panel/empresa/' + params.id + '/revisar">Revisar y enviar</a></span></div>' : '';
-    return { layout: 'panel', nav: 'empresas', title: v.empresa, html: html, actionBar: bar };
+    if (v.estado === 'baja') {
+      return { layout: 'panel', nav: 'empresas', title: v.empresa, html: '<nav class="pn-crumbs"><a href="#/panel/empresas">' + C.icon('arrowLeft', 16) + ' Empresas</a></nav><h1 class="h1">' + e(v.empresa) + '</h1><div class="pn-banner is-alert mt-16">' + C.icon('alert', 18) + '<span>Se revirtió la creación de esta cuenta. Ya no aparece en Empresas.</span></div>' };
+    }
+    const body = { usuarios: tabUsuarios, legal: tabLegal, sucursales: tabSucursales, recepcionistas: tabRecepcionistas, credito: tabCredito, pedidos: tabPedidos, historial: tabHistorial }[tab](params.id, v);
+    const html = (C.ui.flash ? '<div class="pn-banner is-sent">' + C.icon('check', 18) + '<span>' + e(C.ui.flash) + '</span></div>' : '') +
+      '<nav class="pn-crumbs" aria-label="Ruta"><a href="#/panel/empresas">' + C.icon('arrowLeft', 16) + ' Empresas</a></nav>' +
+      '<header class="pn-emp-hero"><div class="pn-emp-id">' + avatar(v.empresa, 'is-sq is-lg') + '<h1 class="h1">' + e(v.empresa) + '</h1>' + empBadge(v) + '</div>' +
+      '<div class="pn-hero-actions">' + C.btn('Hacer pedido', { icon: 'store', action: 'pnActAs', arg: params.id }) + '</div></header>' +
+      '<nav class="pn-tabs" aria-label="Secciones de la empresa">' + tabs + '</nav><div class="pn-tab-body">' + body + '</div>';
+    return { layout: 'panel', nav: 'empresas', title: v.empresa, html: html };
   });
 
-  /* ---------- Edición en borrador ---------- */
-  function curEmp() { const m = C.currentPath().match(/^\/panel\/empresa\/([^/]+)/); return m ? m[1] : null; }
-  A.pnNew = function (el) {
-    const v = C.empView(curEmp());
-    C.ui.creating = el.dataset.arg; C.ui.editing = null; C.ui.errors = {};
-    C.ui.draft = el.dataset.arg === 'rec' ? { sucursalId: (v.sucursales[0] || {}).id || '', nombre: '', tel: '' } : (el.dataset.arg === 'suc' ? { dir: '', ciudad: '', pin: null } : { nombre: '', apellido: '', rol: '', email: '', wa: '' });
-    C.set();
+  /* ======================= MODAL DEL PANEL (agregar / editar) ======================= */
+  function scope() {
+    const p = C.currentPath();
+    if (p.indexOf('/panel/nueva') === 0) return 'nueva';
+    if (p.indexOf('/panel/equipo') === 0) return 'equipo';
+    const m = p.match(/^\/panel\/empresa\/([^/]+)/);
+    return m ? m[1] : null;
+  }
+  const N = function () { return P().nueva; };
+  /* fuente de datos del modal: una empresa, el alta en curso o el equipo */
+  function src(sc) { return sc === 'nueva' ? { sucursales: N().sucursales, recepcionistas: N().recepcionistas } : C.empresa(sc); }
+
+  function openModal(kind, id, opts) {
+    opts = opts || {};
+    const sc = opts.empId || scope(), s = sc === 'equipo' ? null : src(sc);
+    C.ui.errors = {};
+    C.ui.pnModal = { kind: kind, id: id, sc: sc };
+    if (kind === 'user') {
+      const u = id === 'new' ? null : usersOf(s).find(function (x) { return x.id === id; });
+      C.ui.draft = u ? C.clone(u) : { nombre: '', apellido: '', rol: '', email: '', wa: '' };
+    } else if (kind === 'legal') C.ui.draft = Object.assign({ empresa: s.empresa }, C.clone(s.formaJuridica));
+    else if (kind === 'suc') {
+      const it = id === 'new' ? null : s.sucursales.find(function (x) { return x.id === id; });
+      C.ui.draft = it ? C.clone(it) : { dir: '', ciudad: '', pin: null };
+    } else if (kind === 'rec') {
+      const it = id === 'new' ? null : s.recepcionistas.find(function (x) { return x.id === id; });
+      C.ui.draft = it ? C.clone(it) : { sucursalId: opts.sucId || (s.sucursales[0] || {}).id || '', nombre: '', tel: '' };
+    } else if (kind === 'seller') {
+      const p = id === 'new' ? null : P().equipo.find(function (x) { return x.id === id; });
+      C.ui.draft = p ? C.clone(p) : { nombre: '', rol: 'Vendedor', email: '', wa: '' };
+    } else if (kind === 'invite') C.ui.draft = {};
+    C.renderOverlays();
+  }
+  A.pmOpen = function (el) { const a = el.dataset.arg.split(':'); openModal(a[0], a[1], { sucId: a[2] }); };
+  A.pmClose = function () { C.ui.pnModal = null; C.ui.errors = {}; C.renderOverlays(); };
+
+  function sucFields() {
+    return C.map({ interactive: true, action: 'pnMap', pin: C.ui.draft.pin }) + '<div class="form-grid mt-16">' +
+      C.field({ label: 'Dirección', bind: 'ui.draft.dir', placeholder: 'Ej. Av. 6 de Agosto 1234' }) + C.field({ label: 'Ciudad', bind: 'ui.draft.ciudad', placeholder: 'Ej. La Paz' }) + '</div>';
+  }
+  A.pnMap = function (el, ev) {
+    const g = C.geocodeFromClick(el, ev);
+    C.ui.draft.pin = g.pin; C.ui.draft.dir = g.dir; C.ui.draft.ciudad = g.ciudad;
+    delete C.ui.errors['ui.draft.dir']; delete C.ui.errors['ui.draft.ciudad'];
+    C.renderOverlays();
   };
-  A.pnEdit = function (el) {
-    const id = curEmp(), v = C.empView(id);
-    const parts = el.dataset.arg.split(':'), type = parts[0], eid = parts[1];
-    C.ui.creating = null; C.ui.errors = {}; C.ui.editing = { type: type, id: eid };
-    if (type === 'user') { const u = usersOf(v).find(function (x) { return x.id === eid; }); C.ui.draft = C.clone(u); }
-    else if (type === 'suc') C.ui.draft = C.clone(v.sucursales.find(function (x) { return x.id === eid; }));
-    else if (type === 'rec') C.ui.draft = C.clone(v.recepcionistas.find(function (x) { return x.id === eid; }));
-    else if (type === 'legal') C.ui.draft = Object.assign({ empresa: v.empresa }, C.clone(v.formaJuridica));
-    else if (type === 'cred') {
-      const c = C.clone(v.credito);
-      C.ui.draft = { estado: 'aprobado', linea: c.linea ? String(c.linea) : '', plazo: String(c.plazo || 30), docs: Object.assign(C.emptyDocs(), c.docs || {}), usado: c.usado || 0 };
+  A.pnFj = function (el) { C.ui.draft.tipo = el.dataset.arg; delete C.ui.errors.tipo; C.renderOverlays(); };
+
+  C.renderPnModal = function () {
+    const m = C.ui.pnModal, d = C.ui.draft, isNew = m.id === 'new';
+    const s = m.sc === 'equipo' ? null : src(m.sc);
+    let title = '', body = '', del = false, save = 'Guardar';
+    if (m.kind === 'user') {
+      title = isNew ? 'Nuevo usuario' : (m.id === 'principal' ? 'Contacto principal' : 'Editar usuario'); del = !isNew && m.id !== 'principal';
+      body = '<div class="form-grid">' + C.field({ label: 'Nombre', bind: 'ui.draft.nombre' }) + C.field({ label: 'Apellido', bind: 'ui.draft.apellido' }) +
+        C.selectField({ label: 'Rol', bind: 'ui.draft.rol', placeholder: 'Elegir rol', options: C.ROLES.map(function (r) { return { value: r, label: r }; }) }) +
+        C.field({ label: 'WhatsApp', bind: 'ui.draft.wa', type: 'tel', placeholder: '+591 7000 0000' }) +
+        C.field({ label: 'Correo electrónico', bind: 'ui.draft.email', type: 'email', cls: 'span-2', placeholder: 'nombre@empresa.bo' }) + '</div>';
+    } else if (m.kind === 'legal') {
+      title = 'Datos legales';
+      const cards = C.FORMAS_JURIDICAS.map(function (f) { return C.choice({ label: f.label, selected: d.tipo === f.id, action: 'pnFj', arg: f.id }); }).join('');
+      body = '<div class="stack">' + C.field({ label: 'Nombre comercial', bind: 'ui.draft.empresa' }) +
+        '<div class="field' + C.errCls('tipo') + '"><span class="label">Forma jurídica</span><div class="choice-grid cols-3">' + cards + '</div>' + C.err('tipo') + '</div>' +
+        (d.tipo === 'natural' ? C.field({ label: 'CI', bind: 'ui.draft.ci' })
+          : '<div class="form-grid">' + C.field({ label: 'Razón social', bind: 'ui.draft.razon', cls: 'span-2' }) + C.field({ label: 'NIT', bind: 'ui.draft.nit', inputmode: 'numeric' }) + C.field({ label: 'Matrícula de comercio', bind: 'ui.draft.matricula' }) + '</div>') + '</div>';
+    } else if (m.kind === 'suc') {
+      title = isNew ? 'Nueva sucursal' : 'Editar sucursal'; del = !isNew; body = sucFields();
+    } else if (m.kind === 'rec') {
+      title = isNew ? 'Nuevo recepcionista' : 'Editar recepcionista'; del = !isNew;
+      body = '<div class="stack">' + C.selectField({ label: 'Sucursal', bind: 'ui.draft.sucursalId', placeholder: 'Elegir sucursal', options: s.sucursales.map(function (x) { return { value: x.id, label: C.sucLabel(x) }; }) }) +
+        '<div class="form-grid">' + C.field({ label: 'Nombre recepcionista', bind: 'ui.draft.nombre' }) + C.field({ label: 'Teléfono recepcionista', bind: 'ui.draft.tel', inputmode: 'tel' }) + '</div></div>';
+    } else if (m.kind === 'seller') {
+      title = isNew ? 'Nuevo vendedor' : 'Editar vendedor';
+      body = '<div class="form-grid">' + C.field({ label: 'Nombre y apellido', bind: 'ui.draft.nombre', cls: 'span-2' }) +
+        C.field({ label: 'Correo de Cooltiva', bind: 'ui.draft.email', type: 'email' }) + C.field({ label: 'WhatsApp', bind: 'ui.draft.wa', type: 'tel' }) +
+        C.field({ label: 'Cargo', bind: 'ui.draft.rol', cls: 'span-2' }) + '</div>';
+    } else if (m.kind === 'invite') {
+      title = 'Pedir al cliente que solicite su crédito'; save = 'Enviar';
+      body = '<p>Le enviamos un enlace para que, desde su celular, suba sus documentos y firme electrónicamente la solicitud.</p>' +
+        '<dl class="pn-rows mt-16"><div><dt>Para</dt><dd>' + e(fullName(s.user)) + '</dd></div><div><dt>Correo</dt><dd>' + e(s.user.email || '—') + '</dd></div><div><dt>WhatsApp</dt><dd>' + e(s.user.wa || '—') + '</dd></div></dl>';
     }
-    C.set();
+    return '<div class="overlay modal-overlay" data-action="pmClose"></div>' +
+      '<div class="pmodal" role="dialog" aria-modal="true" aria-labelledby="pm-title">' +
+      '<header class="pmodal-head"><h2 class="h2" id="pm-title">' + e(title) + '</h2><button type="button" class="icon-btn" aria-label="Cerrar" data-action="pmClose">' + C.icon('x', 20) + '</button></header>' +
+      '<div class="pmodal-body">' + body + '</div>' +
+      '<footer class="pmodal-foot"><div>' + (del ? C.link('Eliminar', 'pmAskDelete', m.kind + ':' + m.id) : '') + '</div><div class="pmodal-actions">' +
+      C.btn('Cancelar', { action: 'pmClose' }) + C.btn(save, { primary: true, action: 'pmSave' }) + '</div></footer></div>';
   };
-  A.pnCancel = function () { C.ui.creating = null; C.ui.editing = null; C.ui.errors = {}; C.set(); };
-  A.pnFj = function (el) { C.ui.draft.tipo = el.dataset.arg; delete C.ui.errors.tipo; C.set(); };
-  A.pnCredEstado = function (el) { C.ui.draft.estado = el.dataset.arg; C.set(); };
+  C.mountPnModal = function () {
+    const f = document.querySelector('.pmodal .has-error input, .pmodal .has-error select');
+    if (f) { f.focus(); return; }
+    const first = document.querySelector('.pmodal input, .pmodal select');
+    if (first && !document.querySelector('.pmodal').contains(document.activeElement)) first.focus({ preventScroll: true });
+  };
+  function modalFail(err) { C.ui.errors = err; C.renderOverlays(); return false; }
 
   function validUser(d) {
     const err = {};
@@ -397,32 +377,16 @@
     if ((d.wa || '').replace(/\D/g, '').length < 8) err['ui.draft.wa'] = 'Escribe un WhatsApp válido';
     return err;
   }
-  A.pnSave = function (el) {
-    const id = curEmp(), d = C.ui.draft, v = C.empView(id);
-    const parts = el.dataset.arg.split(':'), type = parts[0], eid = parts[1];
+  A.pmSave = function () {
+    const m = C.ui.pnModal, d = C.ui.draft, isNew = m.id === 'new', sc = m.sc;
     let err = {};
-    if (type === 'user') {
-      err = validUser(d); if (Object.keys(err).length) return C.fail(err);
+    if (m.kind === 'user') {
+      err = validUser(d); if (Object.keys(err).length) return modalFail(err);
       const val = { nombre: d.nombre.trim(), apellido: (d.apellido || '').trim(), rol: d.rol, email: d.email.trim(), wa: d.wa.trim() };
-      if (eid === 'principal') C.draftAdd(id, { op: 'set', path: 'user', value: val });
-      else if (eid === 'new') C.draftAdd(id, { op: 'add', coll: 'empleados', item: Object.assign({ id: C.uid('e') }, val) });
-      else C.draftAdd(id, { op: 'update', coll: 'empleados', id: eid, value: val });
-    } else if (type === 'suc') {
-      if (!(d.dir || '').trim()) err['ui.draft.dir'] = 'Escribe la dirección o toca el mapa';
-      if (!(d.ciudad || '').trim()) err['ui.draft.ciudad'] = 'Escribe la ciudad';
-      if (Object.keys(err).length) return C.fail(err);
-      const val = { dir: d.dir.trim(), ciudad: d.ciudad.trim(), pin: d.pin || { x: 50, y: 50 } };
-      if (eid === 'new') C.draftAdd(id, { op: 'add', coll: 'sucursales', item: Object.assign({ id: C.uid('s') }, val) });
-      else C.draftAdd(id, { op: 'update', coll: 'sucursales', id: eid, value: val });
-    } else if (type === 'rec') {
-      if (!d.sucursalId) err['ui.draft.sucursalId'] = 'Elige la sucursal';
-      if (!(d.nombre || '').trim()) err['ui.draft.nombre'] = 'Escribe el nombre';
-      if ((d.tel || '').replace(/\D/g, '').length < 7) err['ui.draft.tel'] = 'Escribe un teléfono válido';
-      if (Object.keys(err).length) return C.fail(err);
-      const val = { nombre: d.nombre.trim(), tel: d.tel.trim(), sucursalId: d.sucursalId };
-      if (eid === 'new') C.draftAdd(id, { op: 'add', coll: 'recepcionistas', item: Object.assign({ id: C.uid('r') }, val) });
-      else C.draftAdd(id, { op: 'update', coll: 'recepcionistas', id: eid, value: val });
-    } else if (type === 'legal') {
+      if (m.id === 'principal') commit(sc, [{ op: 'set', path: 'user', value: val }], 'Editó el contacto principal');
+      else if (isNew) commit(sc, [{ op: 'add', coll: 'empleados', item: Object.assign({ id: C.uid('e') }, val) }], 'Agregó un usuario');
+      else commit(sc, [{ op: 'update', coll: 'empleados', id: m.id, value: val }], 'Editó un usuario');
+    } else if (m.kind === 'legal') {
       if (!(d.empresa || '').trim()) err['ui.draft.empresa'] = 'Escribe el nombre comercial';
       if (!d.tipo) err.tipo = 'Elige la forma jurídica';
       else if (d.tipo === 'natural') { if (!(d.ci || '').trim()) err['ui.draft.ci'] = 'Escribe el CI'; }
@@ -431,282 +395,166 @@
         if (!/^\d{6,}$/.test((d.nit || '').replace(/\s/g, ''))) err['ui.draft.nit'] = 'El NIT debe tener solo números';
         if (!(d.matricula || '').trim()) err['ui.draft.matricula'] = 'Escribe la matrícula';
       }
-      if (Object.keys(err).length) return C.fail(err);
-      if (d.empresa.trim() !== v.empresa) C.draftAdd(id, { op: 'set', path: 'empresa', value: d.empresa.trim() });
+      if (Object.keys(err).length) return modalFail(err);
+      const emp = C.empresa(sc), ops = [];
+      if (d.empresa.trim() !== emp.empresa) ops.push({ op: 'set', path: 'empresa', value: d.empresa.trim() });
       const fj = d.tipo === 'natural' ? { tipo: 'natural', ci: d.ci.trim(), razon: '', nit: '', matricula: '' } : { tipo: d.tipo, ci: '', razon: d.razon.trim(), nit: d.nit.trim(), matricula: d.matricula.trim() };
-      C.draftAdd(id, { op: 'set', path: 'formaJuridica', value: fj });
-    } else if (type === 'cred') {
-      if (d.estado === 'aprobado') {
-        if (!(Number(d.linea) > 0)) err['ui.draft.linea'] = 'Escribe la línea aprobada';
-        C.DOC_KEYS.forEach(function (k) { if (!(d.docs[k] || []).length) err['ui.draft.docs.' + k] = 'Falta este documento'; });
+      if (JSON.stringify(fj) !== JSON.stringify(emp.formaJuridica)) ops.push({ op: 'set', path: 'formaJuridica', value: fj });
+      if (ops.length) commit(sc, ops, 'Editó los datos legales'); else C.toast('Sin cambios');
+    } else if (m.kind === 'suc') {
+      if (!(d.dir || '').trim()) err['ui.draft.dir'] = 'Escribe la dirección o toca el mapa';
+      if (!(d.ciudad || '').trim()) err['ui.draft.ciudad'] = 'Escribe la ciudad';
+      if (Object.keys(err).length) return modalFail(err);
+      const val = { dir: d.dir.trim(), ciudad: d.ciudad.trim(), pin: d.pin || { x: 50, y: 50 } };
+      if (sc === 'nueva') return saveNuevaSuc(isNew ? null : m.id, val);
+      if (isNew) commit(sc, [{ op: 'add', coll: 'sucursales', item: Object.assign({ id: C.uid('s') }, val) }], 'Agregó una sucursal');
+      else commit(sc, [{ op: 'update', coll: 'sucursales', id: m.id, value: val }], 'Editó una sucursal');
+    } else if (m.kind === 'rec') {
+      if (!d.sucursalId) err['ui.draft.sucursalId'] = 'Elige la sucursal';
+      if (!(d.nombre || '').trim()) err['ui.draft.nombre'] = 'Escribe el nombre';
+      if ((d.tel || '').replace(/\D/g, '').length < 7) err['ui.draft.tel'] = 'Escribe un teléfono válido';
+      if (Object.keys(err).length) return modalFail(err);
+      const val = { nombre: d.nombre.trim(), tel: d.tel.trim(), sucursalId: d.sucursalId };
+      if (sc === 'nueva') {
+        if (isNew) N().recepcionistas.push(Object.assign({ id: C.uid('r') }, val));
+        else Object.assign(N().recepcionistas.find(function (x) { return x.id === m.id; }), val);
+        delete C.ui.errors.recs; C.ui.pnModal = null; C.set(); return;
       }
-      if (Object.keys(err).length) return C.fail(err);
-      C.draftAdd(id, { op: 'set', path: 'credito', value: { estado: d.estado, linea: d.estado === 'aprobado' ? Number(d.linea) : 0, plazo: Number(d.plazo), usado: d.usado || 0, docs: d.docs } });
+      if (isNew) commit(sc, [{ op: 'add', coll: 'recepcionistas', item: Object.assign({ id: C.uid('r') }, val) }], 'Agregó un recepcionista');
+      else commit(sc, [{ op: 'update', coll: 'recepcionistas', id: m.id, value: val }], 'Editó un recepcionista');
+    } else if (m.kind === 'seller') {
+      if (!(d.nombre || '').trim()) err['ui.draft.nombre'] = 'Escribe el nombre';
+      if (!/^\S+@\S+\.\S+$/.test(d.email || '')) err['ui.draft.email'] = 'Escribe un correo válido';
+      if ((d.wa || '').replace(/\D/g, '').length < 8) err['ui.draft.wa'] = 'Escribe un WhatsApp válido';
+      if (Object.keys(err).length) return modalFail(err);
+      const val = { nombre: d.nombre.trim(), rol: (d.rol || 'Vendedor').trim(), email: d.email.trim(), wa: d.wa.trim() };
+      if (isNew) { P().equipo.push(Object.assign({ id: C.uid('p') }, val)); addLog({ accion: 'equipo', empresaId: null, texto: 'Agregó a ' + val.nombre + ' al equipo' }); }
+      else { Object.assign(P().equipo.find(function (x) { return x.id === m.id; }), val); addLog({ accion: 'equipo', empresaId: null, texto: 'Editó los datos de ' + val.nombre }); }
+      C.toast('Guardado · avisamos a ' + avisados());
+    } else if (m.kind === 'invite') {
+      const emp = C.empresa(sc);
+      emp.credito.invitado = { fecha: C.nowISO(), por: C.persona().nombre };
+      addLog({ accion: 'invitacion', empresaId: sc, texto: 'Le pidió al cliente que solicite Crédito Cooltiva (correo y WhatsApp)' });
+      C.toast('Enviado a ' + (emp.user.email || 'el cliente') + ' y al WhatsApp ' + (emp.user.wa || ''));
     }
-    C.ui.creating = null; C.ui.editing = null; C.ui.errors = {};
+    C.ui.pnModal = null; C.ui.errors = {};
     C.set();
-    C.toast('Guardado en el borrador · aún no se aplica');
   };
-  A.pnDelete = function (el) {
-    const id = curEmp(), v = C.empView(id);
-    const parts = el.dataset.arg.split(':'), coll = parts[0], eid = parts[1];
-    const item = v[coll].find(function (x) { return x.id === eid; });
-    const name = coll === 'sucursales' ? item.dir : (coll === 'recepcionistas' ? item.nombre : (fullName(item) || item.email));
-    const n = coll === 'sucursales' ? v.recepcionistas.filter(function (r) { return r.sucursalId === eid; }).length : 0;
+
+  /* Eliminar (con confirmación) */
+  A.pmAskDelete = function (el) {
+    const a = el.dataset.arg.split(':'), kind = a[0], id = a[1];
+    const sc = C.ui.pnModal ? C.ui.pnModal.sc : scope(), s = src(sc);
+    let name = '', extra = '';
+    if (kind === 'user') { const u = usersOf(s).find(function (x) { return x.id === id; }); name = fullName(u) || u.email; }
+    if (kind === 'suc') { const it = s.sucursales.find(function (x) { return x.id === id; }); name = it.dir; const n = s.recepcionistas.filter(function (r) { return r.sucursalId === id; }).length; if (n) extra = '<br>También se eliminan sus ' + n + (n === 1 ? ' recepcionista.' : ' recepcionistas.'); }
+    if (kind === 'rec') { name = s.recepcionistas.find(function (x) { return x.id === id; }).nombre; }
     C.ui.dialog = {
-      title: '¿Eliminar ' + ({ sucursales: 'esta sucursal', recepcionistas: 'este recepcionista', empleados: 'este usuario' })[coll] + '?',
-      body: '<strong>' + e(name) + '</strong>' + (n ? '<br>También se eliminarán sus ' + n + ' recepcionista' + (n > 1 ? 's' : '') + '.' : '') + '<br>Va al borrador y solo se aplica cuando otra persona lo apruebe.',
-      confirm: 'Agregar al borrador', action: 'pnDeleteYes', arg: el.dataset.arg
+      title: '¿Eliminar ' + ({ user: 'este usuario', suc: 'esta sucursal', rec: 'este recepcionista' })[kind] + '?',
+      body: '<strong>' + e(name) + '</strong>' + extra + (sc === 'nueva' ? '' : '<br>Se aplica al instante y queda en el registro: otro vendedor puede revertirlo.'),
+      confirm: 'Eliminar', action: 'pmDeleteYes', arg: sc + ':' + kind + ':' + id
     };
     C.renderOverlays();
   };
-  A.pnDeleteYes = function (el) {
-    const parts = el.dataset.arg.split(':');
-    C.draftAdd(curEmp(), { op: 'remove', coll: parts[0], id: parts[1] });
-    C.ui.dialog = null; C.set();
-    C.toast('Eliminación agregada al borrador');
-  };
-  A.pnUndo = function (el) {
-    const id = curEmp(), key = el.dataset.arg;
-    const d = P().drafts[id]; if (!d) return;
-    d.ops = d.ops.filter(function (o) { return C.opKey(o) !== key; });
-    if (!d.ops.length) delete P().drafts[id];
+  A.pmDeleteYes = function (el) {
+    const a = el.dataset.arg.split(':'), sc = a[0], kind = a[1], id = a[2];
+    const coll = { user: 'empleados', suc: 'sucursales', rec: 'recepcionistas' }[kind];
+    if (sc === 'nueva') {
+      N()[coll] = N()[coll].filter(function (x) { return x.id !== id; });
+      if (coll === 'sucursales') N().recepcionistas = N().recepcionistas.filter(function (r) { return r.sucursalId !== id; });
+    } else commit(sc, [{ op: 'remove', coll: coll, id: id }], 'Eliminó ' + ({ user: 'un usuario', suc: 'una sucursal', rec: 'un recepcionista' })[kind]);
+    C.ui.dialog = null; C.ui.pnModal = null;
     C.set();
   };
-  A.pnDiscard = function (el) {
-    C.ui.dialog = { title: '¿Descartar los cambios?', body: 'Se pierden ' + C.draftOps(el.dataset.arg).length + ' cambios sin enviar. Los datos de la empresa no cambian.', confirm: 'Descartar', action: 'pnDiscardYes', arg: el.dataset.arg };
-    C.renderOverlays();
-  };
-  A.pnDiscardYes = function (el) {
-    delete P().drafts[el.dataset.arg]; C.ui.dialog = null; C.set(); C.toast('Borrador descartado');
-    if (C.currentPath().indexOf('/revisar') > -1) C.go('/panel/empresa/' + el.dataset.arg + '/usuarios');
-  };
 
-  /* ---------- Lista simple de cambios: qué se cambió, sin tablas ---------- */
-  function changeList(ops, emp, removable) {
+  /* ======================= REGISTRO DE CAMBIOS (con Revertir) ======================= */
+  function changeList(ops, emp) {
     return '<ul class="pn-changes">' + ops.map(function (o) {
-      const d = C.describeOp(o, emp), k = d.kind;
-      const what = cap(d.title.replace(/^(Agregar|Editar|Eliminar) /, ''));
+      const d = C.describeOp(o, emp || {}), k = d.kind;
       let detail = '';
       if (k === 'edit') detail = d.rows.map(function (r) { return '<span class="pn-chg"><span class="muted">' + e(r.label) + '</span> <s>' + e(r.before) + '</s> <b>→ ' + e(r.after) + '</b></span>'; }).join('');
       else if (k === 'add') detail = d.rows.filter(function (r) { return r.after && r.after !== '—'; }).map(function (r) { return '<span class="pn-chg"><span class="muted">' + e(r.label) + '</span> <b>' + e(r.after) + '</b></span>'; }).join('');
-      else detail = '<span class="pn-chg muted">Se quita de la cuenta' + (o.coll === 'sucursales' ? ' con sus recepcionistas' : '') + '</span>';
-      return '<li class="pn-change">' + badge({ add: 'Agregar', edit: 'Editar', remove: 'Eliminar' }[k], k === 'remove' ? 'alert' : (k === 'add' ? 'ok' : 'neutral')) +
-        '<div class="pn-change-body"><strong>' + e(what) + '</strong><div class="pn-chgs">' + detail + '</div></div>' + (removable ? C.link('Quitar', 'pnUndo', C.opKey(o)) : '') + '</li>';
+      else detail = '<span class="pn-chg muted">Se quitó de la cuenta' + (o.coll === 'sucursales' ? ' con sus recepcionistas' : '') + '</span>';
+      return '<li class="pn-change">' + badge({ add: 'Agregó', edit: 'Editó', remove: 'Eliminó' }[k], k === 'remove' ? 'alert' : (k === 'add' ? 'ok' : 'neutral')) +
+        '<div class="pn-change-body"><strong>' + e(cap(d.title)) + '</strong><div class="pn-chgs">' + detail + '</div></div></li>';
     }).join('') + '</ul>';
   }
-
-  function approverField(bind) {
-    const opts = P().equipo.filter(function (p) { return p.id !== P().persona; });
-    return C.selectField({ label: 'Quién aprueba', bind: bind, err: 'revisor', placeholder: 'Elegir aprobador', options: opts.map(function (p) { return { value: p.id, label: p.nombre + ' · ' + p.rol }; }) });
+  const VERB = { cambio: 'editó', alta: 'creó la cuenta', reversion: 'revirtió un cambio', pedido: 'hizo un pedido', credito: 'solicitó crédito', invitacion: 'pidió al cliente que solicite crédito', equipo: 'actualizó el equipo' };
+  function entryCard(l, withEmpresa, flags) {
+    const emp = C.empresa(l.empresaId), actor = C.persona(l.actor);
+    const revertible = (l.accion === 'cambio' || l.accion === 'alta') && l.actor !== 'cliente' && !l.revertedBy && emp && emp.estado !== 'baja';
+    const who = l.actor === P().persona ? 'Tú' : actor.nombre;
+    return '<article class="card pn-entry' + (flags.isNew ? ' is-new' : '') + (l.revertedBy ? ' is-reverted' : '') + '">' +
+      '<header class="pn-entry-head">' + avatar(actor.nombre, 'is-sm') + '<div class="pn-entry-t"><span><strong>' + e(who) + '</strong> ' + e(VERB[l.accion] || '') +
+      (withEmpresa && emp ? ' · <a href="#/panel/empresa/' + emp.id + '/historial">' + e(emp.empresa) + '</a>' : '') + '</span><span class="muted small">' + fmtDT(l.fecha) + ' · ' + e(l.texto) + '</span></div>' +
+      (flags.isNew ? badge('Nuevo', 'draft') : '') + (l.revertedBy ? badge('Revertido', 'alert') : '') + '</header>' +
+      (l.ops && l.ops.length ? changeList(l.ops, emp) : '') +
+      (l.revertedBy ? '<p class="muted small pn-entry-foot">Revertido por ' + e(C.persona(l.revertedBy).nombre) + ' · ' + fmtDT(l.revertedAt) + '</p>' : '') +
+      (revertible ? '<div class="pn-entry-foot">' + C.btn(l.actor === P().persona ? 'Deshacer' : 'Revertir', { sm: true, icon: 'refresh', action: 'pnRevert', arg: l.id }) + '</div>' : '') +
+      '</article>';
   }
-
-  /* ---------- Revisar y enviar (confirmación final) ---------- */
-  function revisarPage(id) {
-    const ops = C.draftOps(id), emp = C.empresa(id);
-    if (!ops.length) return { redirect: '/panel/empresa/' + id + '/usuarios' };
-    const d = C.ui.draft;
-    if (!d.revisor || d.revisor === P().persona) d.revisor = defaultApprover();
-    if (d.notificar == null) d.notificar = true;
-    const html = '<nav class="pn-crumbs"><a href="#/panel/empresa/' + id + '/usuarios">' + C.icon('arrowLeft', 16) + ' ' + e(emp.empresa) + '</a></nav>' +
-      '<div class="pn-head"><h1 class="h1">Revisa y envía</h1></div>' +
-      '<p class="muted mb-12">' + ops.length + (ops.length === 1 ? ' cambio' : ' cambios') + ' en ' + e(emp.empresa) + '. No se aplican hasta que otra persona los apruebe.</p>' +
-      changeList(ops, C.empView(id), true) +
-      '<section class="card card-pad pn-send"><div class="stack">' + approverField('ui.draft.revisor') +
-      C.field({ label: 'Motivo (opcional)', bind: 'ui.draft.nota', placeholder: 'Ej. El cliente lo pidió por WhatsApp' }) +
-      C.checkbox({ bind: 'ui.draft.notificar', label: 'Avisar al cliente por correo y WhatsApp cuando se apruebe' }) + '</div></section>';
-    const bar = '<div class="pn-actionbar-in"><span class="pn-ab-t"><strong>' + ops.length + (ops.length === 1 ? ' cambio' : ' cambios') + '</strong></span><span class="pn-ab-actions">' +
-      '<a class="btn btn-sm" href="#/panel/empresa/' + id + '/usuarios">Seguir editando</a>' + C.btn('Enviar a aprobación', { primary: true, sm: true, action: 'pnSend', arg: id }) + '</span></div>';
-    return { layout: 'panel', nav: 'empresas', title: 'Revisar cambios', html: html, narrow: true, actionBar: bar };
-  }
-  A.pnSend = function (el) {
-    const id = el.dataset.arg, d = C.ui.draft;
-    if (!d.revisor) return C.fail({ revisor: 'Elige quién aprueba' });
-    const emp = C.empresa(id), ops = C.clone(C.draftOps(id));
-    const req = { id: P().nextReq++, tipo: 'cambios', empresaId: id, empresaNombre: emp.empresa, autor: P().persona, revisor: d.revisor, estado: 'pendiente', fecha: C.nowISO(), notificar: d.notificar !== false, nota: (d.nota || '').trim(), ops: ops };
-    P().requests.unshift(req);
-    delete P().drafts[id];
-    log('envio', id, 'Envió ' + ops.length + (ops.length === 1 ? ' cambio' : ' cambios') + ' a aprobación de ' + C.persona(d.revisor).nombre, req.id);
-    C.save();
-    C.go('/panel/solicitud/' + req.id + '?enviada=1');
-  };
-
-  /* ======================= SOLICITUD (simple) ======================= */
-  function altaSummary(emp) {
-    const fj = emp.formaJuridica, c = emp.credito;
-    const legal = fj.tipo === 'natural' ? 'Persona natural · CI ' + (fj.ci || '—') : (fj.razon || '—') + ' · NIT ' + (fj.nit || '—');
-    const rows = [
-      ['Contacto', e(fullName(emp.user)) + ' · ' + e(emp.user.rol) + '<br><span class="muted">' + e(emp.user.email) + ' · ' + e(emp.user.wa) + '</span>'],
-      ['Datos legales', e(legal)],
-      ['Sucursales', emp.sucursales.map(function (s) { return e(s.dir + ', ' + s.ciudad); }).join('<br>')],
-      ['Recepcionistas', emp.recepcionistas.map(function (r) { return e(r.nombre + ' · ' + r.tel); }).join('<br>') || '—'],
-      ['Crédito', c.estado === 'aprobado' ? e(C.bs(c.linea) + ' · ' + c.plazo + ' días · 6 documentos') : 'Sin crédito']
-    ];
-    if (emp.empleados.length) rows.push(['Usuarios', emp.empleados.map(function (u) { return e(fullName(u) + ' · ' + u.rol); }).join('<br>')]);
-    return '<dl class="pn-rows">' + rows.map(function (r) { return '<div><dt>' + r[0] + '</dt><dd>' + r[1] + '</dd></div>'; }).join('') + '</dl>';
-  }
-
-  C.route('/panel/solicitud/:id', function (params) {
-    const g = guard(); if (g) return g;
-    const r = P().requests.find(function (x) { return String(x.id) === params.id; });
-    if (!r) return { redirect: '/panel/aprobaciones' };
-    const emp = C.empresa(r.empresaId);
-    const me = P().persona, rev = C.persona(r.revisor), autor = C.persona(r.autor);
-    const pending = r.estado === 'pendiente', mine = me === r.revisor;
-    const sent = C.query().enviada === '1' && r.autor === me && pending;
-    const what = r.tipo === 'alta' ? 'el alta de la cuenta' : (r.tipo === 'vendedor' ? 'el alta de ' + r.persona.nombre + ' como vendedor' : (r.ops.length === 1 ? '1 cambio' : r.ops.length + ' cambios'));
-    const intro = mine && pending ? autor.nombre + ' te pidió aprobar ' + what : autor.nombre + ' pidió a ' + rev.nombre + ' aprobar ' + what;
-
-    let content;
-    if (r.tipo === 'alta' && emp) content = altaSummary(emp);
-    else if (r.tipo === 'vendedor') content = '<dl class="pn-rows"><div><dt>Nombre</dt><dd>' + e(r.persona.nombre) + '</dd></div><div><dt>Correo</dt><dd>' + e(r.persona.email) + '</dd></div><div><dt>WhatsApp</dt><dd>' + e(r.persona.wa) + '</dd></div></dl>';
-    else content = changeList(r.ops, C.applyOps(C.clone(emp), pending ? r.ops : []), false);
-
-    let result = '';
-    if (r.estado === 'aprobada') result = '<p class="pn-result">' + C.icon('check', 16) + '<span><strong>Aprobada</strong> por ' + e(rev.nombre) + ' · ' + fmtDT(r.revisado) + (r.comentario ? '<br>“' + e(r.comentario) + '”' : '') + (r.notificar && r.tipo !== 'vendedor' ? '<br>Cliente avisado por ' + e(clientVia(emp)) : '') + '</span></p>';
-    if (r.estado === 'rechazada') result = '<p class="pn-result is-alert">' + C.icon('x', 16) + '<span><strong>Rechazada</strong> por ' + e(rev.nombre) + ' · ' + fmtDT(r.revisado) + '<br>“' + e(r.comentario || '') + '”</span></p>';
-    if (r.estado === 'cancelada') result = '<p class="pn-result">' + C.icon('x', 16) + '<span><strong>Cancelada</strong> por ' + e(autor.nombre) + '</span></p>';
-
-    let bar = '', extra = '';
-    if (pending && mine) {
-      const rejecting = !!C.ui.draft.rejecting;
-      if (rejecting) extra = '<section class="card card-pad mt-16 reveal">' + C.field({ label: 'Motivo del rechazo', bind: 'ui.draft.comentario', err: 'comentario', placeholder: 'Le llega a ' + autor.nombre }) + '</section>';
-      bar = '<div class="pn-actionbar-in"><span class="pn-ab-t hide-m"><strong>' + e(intro) + '</strong></span><span class="pn-ab-actions pn-ab-wide">' +
-        (rejecting ? C.btn('Volver', { action: 'pnRejectToggle', sm: true }) + C.btn('Confirmar rechazo', { primary: true, sm: true, action: 'pnReject', arg: r.id })
-          : C.btn('Rechazar', { action: 'pnRejectToggle', sm: true }) + C.btn('Aprobar', { primary: true, sm: true, action: 'pnApprove', arg: r.id, icon: 'shield' })) + '</span></div>';
-    } else if (pending && me === r.autor) {
-      extra = '<p class="pn-wait mt-16">' + C.icon('clock', 16) + '<span>Esperando a <strong>' + e(rev.nombre) + '</strong>. ' + C.link('Cancelar solicitud', 'pnCancelReq', r.id) + '</span></p>';
-    } else if (pending) {
-      extra = '<p class="pn-wait mt-16">' + C.icon('shield', 16) + '<span>Solo <strong>' + e(rev.nombre) + '</strong> puede aprobarla.</span></p>';
-    }
-
-    const html = (sent ? '<div class="pn-banner is-sent">' + C.icon('check', 18) + '<span>Enviado a <strong>' + e(rev.nombre) + '</strong>. Le avisamos por correo y WhatsApp.</span></div>' : '') +
-      '<nav class="pn-crumbs"><a href="#/panel/aprobaciones">' + C.icon('arrowLeft', 16) + ' Aprobaciones</a></nav>' +
-      '<header class="pn-head"><div><h1 class="h1">' + e(r.empresaNombre) + '</h1><p class="muted">' + e(intro) + ' · ' + fmtDT(r.fecha) + '</p></div>' + estadoBadge(r.estado) + '</header>' +
-      (r.nota ? '<p class="pn-quote">“' + e(r.nota) + '”</p>' : '') +
-      (r.tipo === 'cambios' ? content : '<section class="card card-pad">' + content + '</section>') + result + extra;
-    return { layout: 'panel', nav: 'aprobaciones', title: 'Solicitud #' + r.id, html: html, narrow: true, actionBar: bar };
-  });
-  function estadoBadge(st) { return badge(C.REQ_ESTADOS[st], st === 'aprobada' ? 'ok' : (st === 'rechazada' ? 'alert' : (st === 'pendiente' ? 'pending' : 'neutral'))); }
-
-  function findReq(id) { return P().requests.find(function (x) { return String(x.id) === String(id); }); }
-  A.pnRejectToggle = function () { C.ui.draft.rejecting = !C.ui.draft.rejecting; C.ui.errors = {}; C.set(); };
-  A.pnApprove = function (el) {
-    const r = findReq(el.dataset.arg); if (!r || r.revisor !== P().persona) return;
-    const emp = C.empresa(r.empresaId);
-    r.estado = 'aprobada'; r.revisado = C.nowISO(); r.comentario = '';
-    if (r.tipo === 'alta') { emp.estado = 'activa'; emp.actualizado = r.revisado; }
-    else if (r.tipo === 'vendedor') P().equipo.push(C.clone(r.persona));
-    else { C.applyOps(emp, r.ops); emp.actualizado = r.revisado; }
-    log('aprobacion', r.empresaId, r.tipo === 'alta' ? 'Aprobó el alta de la cuenta' : (r.tipo === 'vendedor' ? 'Aprobó el alta de ' + r.persona.nombre + ' como vendedor' : 'Aprobó y aplicó ' + r.ops.length + (r.ops.length === 1 ? ' cambio' : ' cambios')), r.id);
-    if (r.notificar && emp && r.tipo !== 'vendedor') log('notificacion', r.empresaId, 'Se avisó al cliente por correo y WhatsApp (' + (emp.user.email || 'sin correo') + ' · ' + (emp.user.wa || 'sin WhatsApp') + ')', r.id);
-    C.ui.draft = {}; C.set();
-    C.toast(r.notificar && r.tipo !== 'vendedor' ? 'Aprobado · cliente avisado por correo y WhatsApp (simulado)' : 'Aprobado y aplicado');
-  };
-  A.pnReject = function (el) {
-    const r = findReq(el.dataset.arg), c = (C.ui.draft.comentario || '').trim();
-    if (!r || r.revisor !== P().persona) return;
-    if (c.length < 3) return C.fail({ comentario: 'Cuéntale por qué lo rechazas' });
-    r.estado = 'rechazada'; r.revisado = C.nowISO(); r.comentario = c;
-    if (r.tipo === 'alta') C.empresa(r.empresaId).estado = 'rechazada';
-    log('rechazo', r.empresaId, 'Rechazó la solicitud: ' + c, r.id);
-    C.ui.draft = {}; C.set(); C.toast('Solicitud rechazada');
-  };
-  A.pnCancelReq = function (el) {
-    C.ui.dialog = { title: '¿Cancelar la solicitud?', body: 'Los cambios vuelven a tu borrador para corregirlos y enviarlos de nuevo.', confirm: 'Cancelar solicitud', action: 'pnCancelReqYes', arg: el.dataset.arg };
-    C.renderOverlays();
-  };
-  A.pnCancelReqYes = function (el) {
-    const r = findReq(el.dataset.arg);
-    r.estado = 'cancelada'; r.revisado = C.nowISO();
-    if (r.tipo === 'cambios') { const d = P().drafts[r.empresaId] || (P().drafts[r.empresaId] = { ops: [] }); d.ops = C.clone(r.ops).concat(d.ops); }
-    if (r.tipo === 'alta') C.empresa(r.empresaId).estado = 'rechazada';
-    log('cancelacion', r.empresaId, 'Canceló la solicitud', r.id);
-    C.ui.dialog = null; C.set(); C.toast('Solicitud cancelada');
-  };
-
-  /* ======================= APROBACIONES ======================= */
-  function reqWhat(r) { return r.tipo === 'alta' ? 'Alta de cuenta' : (r.tipo === 'vendedor' ? 'Alta de vendedor' : r.ops.length + (r.ops.length === 1 ? ' cambio' : ' cambios')); }
-  C.route('/panel/aprobaciones', function () {
-    const g = guard(); if (g) return g;
-    const me = P().persona, tab = C.query().tab || 'revisar';
-    const all = P().requests.slice().sort(function (a, b) { return b.fecha.localeCompare(a.fecha); });
-    const lists = {
-      revisar: all.filter(function (r) { return r.estado === 'pendiente' && r.revisor === me; }),
-      enviadas: all.filter(function (r) { return r.autor === me; }),
-      historial: all.filter(function (r) { return r.estado !== 'pendiente'; })
-    };
-    const labels = { revisar: 'Por revisar', enviadas: 'Enviadas por mí', historial: 'Historial' };
-    const tabs = Object.keys(labels).map(function (k) { return '<a class="pn-tabs-a' + (k === tab ? ' is-active' : '') + '" href="#/panel/aprobaciones?tab=' + k + '">' + labels[k] + (lists[k].length ? ' <span class="muted">' + lists[k].length + '</span>' : '') + '</a>'; }).join('');
-    const list = lists[tab] || [];
-    const who = tab === 'enviadas' ? 'Para' : 'De';
-    const rows = list.map(function (r) {
-      return '<tr data-action="pnGo" data-arg="/panel/solicitud/' + r.id + '" role="link" tabindex="0"><td data-label="Empresa"><strong>' + e(r.empresaNombre) + '</strong></td><td data-label="Pedido">' + reqWhat(r) + '</td>' +
-        '<td data-label="' + who + '">' + e(C.persona(tab === 'enviadas' ? r.revisor : r.autor).nombre) + '</td><td data-label="Estado">' + estadoBadge(r.estado) + '</td></tr>';
-    }).join('');
-    const html = '<div class="pn-head"><h1 class="h1">Aprobaciones</h1></div><nav class="pn-tabs">' + tabs + '</nav>' +
-      (list.length ? '<table class="pn-table"><thead><tr><th>Empresa</th><th>Pedido</th><th>' + who + '</th><th>Estado</th></tr></thead><tbody>' + rows + '</tbody></table>'
-        : '<div class="empty"><p class="h3">' + (tab === 'revisar' ? 'Nada por revisar' : 'Nada por aquí') + '</p></div>');
-    return { layout: 'panel', nav: 'aprobaciones', title: 'Aprobaciones', html: html };
-  });
-
-  /* ======================= REGISTRO DE CAMBIOS ======================= */
   C.route('/panel/registro', function () {
     const g = guard(); if (g) return g;
     const d = C.ui.draft;
+    const nuevos = unseen().map(function (l) { return l.id; });
+    // al abrir el registro, las novedades quedan vistas
+    nuevos.forEach(function (id) { seenList().push(id); }); C.save();
     const entries = P().log.filter(function (l) {
       if (d.rEmp && l.empresaId !== d.rEmp) return false;
       if (d.rPer && l.actor !== d.rPer) return false;
       return true;
     }).sort(function (a, b) { return b.fecha.localeCompare(a.fecha); });
-    const emps = Object.keys(C.S.empresas).map(function (k) { return { value: k, label: C.S.empresas[k].empresa }; });
+    const emps = activas().map(function (x) { return { value: x.id, label: x.empresa }; });
     const pers = P().equipo.map(function (p) { return { value: p.id, label: p.nombre }; }).concat([{ value: 'cliente', label: 'Cliente' }]);
     const html = '<div class="pn-head"><h1 class="h1">Registro de cambios</h1></div>' +
+      '<p class="muted mb-12">Los cambios se aplican al instante. Si algo no está bien, revisalo y revertilo.</p>' +
       '<div class="pn-filters">' + C.selectField({ label: 'Empresa', bind: 'ui.draft.rEmp', placeholder: 'Todas', options: emps, rerender: true }) + C.selectField({ label: 'Persona', bind: 'ui.draft.rPer', placeholder: 'Todas', options: pers, rerender: true }) + '</div>' +
-      '<div class="mt-16">' + logTable(entries, true) + '</div>';
-    return { layout: 'panel', nav: 'registro', title: 'Registro de cambios', html: html };
+      '<div class="pn-feed mt-16">' + (entries.length ? entries.map(function (l) { return entryCard(l, true, { isNew: nuevos.indexOf(l.id) > -1 }); }).join('') : '<p class="muted">Sin movimientos.</p>') + '</div>';
+    return { layout: 'panel', nav: 'registro', title: 'Registro de cambios', html: html, narrow: true };
   });
+  A.pnRevert = function (el) {
+    const l = P().log.find(function (x) { return x.id === el.dataset.arg; }), emp = C.empresa(l.empresaId);
+    C.ui.dialog = {
+      title: l.accion === 'alta' ? '¿Revertir la creación de la cuenta?' : '¿Revertir este cambio?',
+      body: l.accion === 'alta' ? '<strong>' + e(emp.empresa) + '</strong> dejará de aparecer en Empresas.' : 'Los datos de <strong>' + e(emp.empresa) + '</strong> vuelven a como estaban antes. ' + (l.actor !== P().persona ? 'Avisamos a ' + e(C.persona(l.actor).nombre) + '.' : ''),
+      confirm: 'Revertir', action: 'pnRevertYes', arg: l.id
+    };
+    C.renderOverlays();
+  };
+  A.pnRevertYes = function (el) {
+    const l = P().log.find(function (x) { return x.id === el.dataset.arg; }), emp = C.empresa(l.empresaId);
+    const autor = C.persona(l.actor).nombre;
+    if (l.accion === 'alta') {
+      emp.estado = 'baja';
+      addLog({ accion: 'reversion', empresaId: l.empresaId, texto: 'Revirtió la creación de la cuenta hecha por ' + autor, revertOf: l.id });
+    } else {
+      const inv = C.inverseOps(l.ops);
+      C.applyOps(emp, inv);
+      emp.actualizado = C.nowISO();
+      addLog({ accion: 'reversion', empresaId: l.empresaId, texto: 'Revirtió el cambio de ' + autor, ops: inv, revertOf: l.id });
+    }
+    l.revertedBy = P().persona; l.revertedAt = C.nowISO();
+    C.ui.dialog = null; C.save(); C.set();
+    C.toast('Revertido' + (l.actor !== P().persona ? ' · avisamos a ' + autor : ''));
+  };
 
   /* ======================= EQUIPO ======================= */
   C.route('/panel/equipo', function () {
     const g = guard(); if (g) return g;
-    const pend = P().requests.filter(function (r) { return r.tipo === 'vendedor' && r.estado === 'pendiente'; });
-    let html = '<div class="pn-head"><h1 class="h1">Equipo</h1>' + C.btn('+ Agregar vendedor', { action: 'pnNewSeller', disabled: C.ui.creating === 'seller' }) + '</div>';
-    if (C.ui.creating === 'seller') {
-      html += '<section class="card card-strong card-pad form-card reveal"><h3 class="h3">Nuevo vendedor</h3><div class="form-grid mt-16">' +
-        C.field({ label: 'Nombre y apellido', bind: 'ui.draft.nombre' }) + C.field({ label: 'WhatsApp', bind: 'ui.draft.wa', type: 'tel' }) +
-        C.field({ label: 'Correo de Cooltiva', bind: 'ui.draft.email', type: 'email' }) + approverField('ui.draft.revisor') + '</div>' +
-        '<div class="form-actions">' + C.btn('Cancelar', { action: 'pnCancel' }) + C.btn('Enviar a aprobación', { primary: true, action: 'pnSendSeller' }) + '</div></section>';
-    }
-    html += '<table class="pn-table"><thead><tr><th>Persona</th><th>Rol</th><th>Correo</th><th>WhatsApp</th></tr></thead><tbody>' +
+    const html = '<div class="pn-head"><h1 class="h1">Equipo</h1>' + C.btn('+ Agregar vendedor', { action: 'pmOpen', arg: 'seller:new' }) + '</div>' +
+      '<table class="pn-table"><thead><tr><th>Persona</th><th>Cargo</th><th>Correo</th><th>WhatsApp</th><th><span class="sr-only">Acciones</span></th></tr></thead><tbody>' +
       P().equipo.map(function (p) {
-        return '<tr><td data-label="Persona"><span class="pn-user">' + avatar(p.nombre, 'is-sm') + '<strong>' + e(p.nombre) + '</strong></span></td><td data-label="Rol">' + e(p.rol) + '</td><td data-label="Correo">' + e(p.email) + '</td><td data-label="WhatsApp">' + e(p.wa) + '</td></tr>';
-      }).join('') + pend.map(function (r) {
-        return '<tr class="is-draft" data-action="pnGo" data-arg="/panel/solicitud/' + r.id + '" role="link" tabindex="0"><td data-label="Persona"><span class="pn-user">' + avatar(r.persona.nombre, 'is-sm') + '<strong>' + e(r.persona.nombre) + '</strong>' + badge('En aprobación', 'pending') + '</span></td><td data-label="Rol">' + e(r.persona.rol) + '</td><td data-label="Correo">' + e(r.persona.email) + '</td><td data-label="WhatsApp">' + e(r.persona.wa) + '</td></tr>';
+        return '<tr><td data-label="Persona"><span class="pn-user">' + avatar(p.nombre, 'is-sm') + '<strong>' + e(p.nombre) + '</strong>' + (p.id === P().persona ? badge('Tú', 'neutral') : '') + '</span></td><td data-label="Cargo">' + e(p.rol) + '</td><td data-label="Correo">' + e(p.email) + '</td><td data-label="WhatsApp">' + e(p.wa) + '</td>' +
+          '<td class="pn-td-actions">' + C.link('Editar', 'pmOpen', 'seller:' + p.id) + '</td></tr>';
       }).join('') + '</tbody></table>';
     return { layout: 'panel', nav: 'equipo', title: 'Equipo', html: html };
   });
-  A.pnNewSeller = function () { C.ui.creating = 'seller'; C.ui.draft = { revisor: defaultApprover() }; C.ui.errors = {}; C.set(); };
-  A.pnSendSeller = function () {
-    const d = C.ui.draft, err = {};
-    if (!(d.nombre || '').trim()) err['ui.draft.nombre'] = 'Escribe el nombre';
-    if (!/^\S+@\S+\.\S+$/.test(d.email || '')) err['ui.draft.email'] = 'Escribe un correo válido';
-    if ((d.wa || '').replace(/\D/g, '').length < 8) err['ui.draft.wa'] = 'Escribe un WhatsApp válido';
-    if (!d.revisor) err.revisor = 'Elige quién aprueba';
-    if (Object.keys(err).length) return C.fail(err);
-    const persona = { id: C.uid('p'), nombre: d.nombre.trim(), rol: 'Vendedor', email: d.email.trim(), wa: d.wa.trim() };
-    const req = { id: P().nextReq++, tipo: 'vendedor', empresaId: null, empresaNombre: persona.nombre, persona: persona, autor: P().persona, revisor: d.revisor, estado: 'pendiente', fecha: C.nowISO(), notificar: false, nota: '', ops: [] };
-    P().requests.unshift(req);
-    log('envio', null, 'Envió el alta de ' + persona.nombre + ' como vendedor a aprobación de ' + C.persona(d.revisor).nombre, req.id);
-    C.save(); C.go('/panel/solicitud/' + req.id + '?enviada=1');
-  };
 
   /* ======================= NUEVA CUENTA (wizard) =======================
-     Contacto → Forma jurídica → Sucursales → Recepcionistas → Crédito → Revisar.
-     Un solo contacto: los demás usuarios se agregan después, desde la ficha. */
-  const NUEVA_STEPS = ['contacto', 'legal', 'sucursales', 'recepcionistas', 'credito', 'revisar'];
-  const NUEVA_LABELS = ['Contacto', 'Forma jurídica', 'Sucursales', 'Recepcionistas', 'Crédito y contrato', 'Revisar y enviar'];
-  const N = function () { return P().nueva; };
+     Contacto → Forma jurídica → Sucursales y recepcionistas → Crédito → Revisar.
+     La cuenta queda activa al crearla; el equipo recibe el aviso. */
+  const NUEVA_STEPS = ['contacto', 'legal', 'sucursales', 'credito', 'revisar'];
+  const NUEVA_LABELS = ['Contacto', 'Forma jurídica', 'Sucursales y recepcionistas', 'Crédito', 'Revisar y crear'];
   function nPage(i, html, rightBtn) {
     return {
       layout: 'wizard', title: 'Nueva cuenta · ' + NUEVA_LABELS[i], width: 'wz-w-mid', logoHref: '#/panel/empresas',
@@ -722,7 +570,7 @@
     return null;
   }
   A.pnNTab = function (el) { C.go('/panel/nueva/' + NUEVA_STEPS[Number(el.dataset.arg)]); };
-  A.pnNuevaExit = function () { C.save(); C.go('/panel/empresas'); C.toast('Alta guardada como borrador'); };
+  A.pnNuevaExit = function () { C.save(); C.go('/panel/empresas'); C.toast('Guardada para continuar después'); };
   const NV = {}, NVAL = {};
 
   C.route('/panel/nueva/:step', function (params) {
@@ -782,189 +630,104 @@
     return err;
   };
 
-  /* Sucursales: formulario solo cuando hace falta; con ≥1 se muestra como tarjeta "+ Agregar" */
-  const suc0 = function () { return { dir: '', ciudad: '', pin: null, adding: false }; };
-  function addSuc() {
-    const d = C.ui.draft;
-    N().sucursales.push({ id: C.uid('s'), dir: d.dir.trim(), ciudad: d.ciudad.trim(), pin: d.pin || { x: 50, y: 50 } });
-    C.ui.draft = suc0();
+  /* Sucursales y recepcionistas: siempre se puede agregar más, todo en modales */
+  function saveNuevaSuc(id, val) {
+    const n = N();
+    if (id) { Object.assign(n.sucursales.find(function (x) { return x.id === id; }), val); C.ui.pnModal = null; C.set(); return; }
+    const s = Object.assign({ id: C.uid('s') }, val);
+    n.sucursales.push(s);
+    delete C.ui.errors.sucs;
+    const c = n.contacto;
+    if (c.rol === 'Recepcionista' && !n.recepcionistas.length) {
+      // igual que en el registro del cliente: el contacto Recepcionista recibe en su primera sucursal
+      n.recepcionistas.push({ id: C.uid('r'), nombre: (c.nombre + ' ' + c.apellido).trim(), tel: c.wa.replace('+591 ', ''), sucursalId: s.id });
+      C.ui.pnModal = null; C.set(); C.toast('Sucursal agregada · ' + (c.nombre || 'el contacto') + ' recibe aquí');
+      return;
+    }
+    // siguiente paso natural: quién recibe en esta sucursal
+    C.set();
+    openModal('rec', 'new', { sucId: s.id });
+    C.toast('Sucursal agregada. ¿Quién recibe aquí?');
   }
   NV.sucursales = function (i) {
-    const list = N().sucursales;
-    if (!('dir' in C.ui.draft)) C.ui.draft = suc0();
-    const adding = !list.length || C.ui.draft.adding;
-    const cards = list.length ? '<div class="item-list">' + list.map(function (s) {
-      return '<article class="card item-card suc-card"><div class="suc-thumb">' + C.map({ small: true, pin: s.pin }) + '</div><div class="item-main"><strong>' + e(s.dir) + '</strong><span class="muted">' + e(s.ciudad) + '</span></div><div class="item-actions">' + C.link('Quitar', 'pnNRemove', 'sucursales:' + s.id) + '</div></article>';
-    }).join('') + '</div>' : '';
-    const form = adding
-      ? '<section class="card card-pad ' + (list.length ? 'card-strong ' : '') + 'mt-16 reveal">' + (list.length ? '<h2 class="h3 mb-12">Nueva sucursal</h2>' : '<p class="muted mb-12">Toca el mapa o escribe la dirección.</p>') + sucFields() +
-        (list.length ? '<div class="form-actions">' + C.btn('Cancelar', { action: 'pnNHideSuc' }) + C.btn('Agregar sucursal', { primary: true, action: 'pnNAddSuc' }) + '</div>' : '') + '</section>'
-      : '<button type="button" class="btn btn-dashed mt-16" data-action="pnNShowSuc">+ Agregar otra sucursal</button>';
-    return nPage(i, '<h1 class="h1 wz-title">Sucursales del cliente</h1>' + cards + form);
-  };
-  A.pnNShowSuc = function () { C.ui.draft = suc0(); C.ui.draft.adding = true; C.set(); };
-  A.pnNHideSuc = function () { C.ui.draft = suc0(); C.ui.errors = {}; C.set(); };
-  A.pnNAddSuc = function () {
-    const d = C.ui.draft, err = {};
-    if (!(d.dir || '').trim()) err['ui.draft.dir'] = 'Escribe la dirección o toca el mapa';
-    if (!(d.ciudad || '').trim()) err['ui.draft.ciudad'] = 'Escribe la ciudad';
-    if (Object.keys(err).length) return C.fail(err);
-    addSuc(); C.set(); C.toast('Sucursal agregada');
-  };
-  A.pnNRemove = function (el) {
-    const parts = el.dataset.arg.split(':'), coll = parts[0], id = parts[1];
-    N()[coll] = N()[coll].filter(function (x) { return x.id !== id; });
-    if (coll === 'sucursales') N().recepcionistas = N().recepcionistas.filter(function (r) { return r.sucursalId !== id; });
-    C.set();
-  };
-  NVAL.sucursales = function () {
-    const d = C.ui.draft, n = N(), err = {};
-    const showing = !n.sucursales.length || d.adding;
-    const dir = (d.dir || '').trim(), ciudad = (d.ciudad || '').trim();
-    if (showing && dir && ciudad) { addSuc(); return {}; }          // lo escrito se guarda solo al pulsar Siguiente
-    if (!n.sucursales.length) {
-      if (!dir) err['ui.draft.dir'] = 'Escribe la dirección o toca el mapa';
-      if (!ciudad) err['ui.draft.ciudad'] = 'Escribe la ciudad';
-    }
-    return err;
-  };
-
-  /* Recepcionistas: igual de simple. Cada sucursal necesita al menos uno */
-  function sinRecep() { const n = N(); return n.sucursales.filter(function (s) { return !n.recepcionistas.some(function (r) { return r.sucursalId === s.id; }); }); }
-  const rec0 = function () { const sin = sinRecep(); return { sucursalId: (sin[0] || N().sucursales[0] || {}).id || '', nombre: '', tel: '', adding: false }; };
-  function addRec() {
-    const d = C.ui.draft;
-    N().recepcionistas.push({ id: C.uid('r'), nombre: d.nombre.trim(), tel: d.tel.trim(), sucursalId: d.sucursalId });
-    C.ui.draft = rec0();
-  }
-  NV.recepcionistas = function (i) {
-    const n = N(), c = n.contacto;
-    // Si el contacto es Recepcionista, se propone como tal (igual que en el registro del cliente)
-    if (c.rol === 'Recepcionista' && !n.recepcionistas.length && n.sucursales.length) {
-      n.recepcionistas.push({ id: C.uid('r'), nombre: (c.nombre + ' ' + c.apellido).trim(), tel: c.wa.replace('+591 ', ''), sucursalId: n.sucursales[0].id });
-      C.save();
-    }
-    if (!('nombre' in C.ui.draft)) C.ui.draft = rec0();
-    const sin = sinRecep();
-    const adding = sin.length > 0 || C.ui.draft.adding;
-    const groups = n.sucursales.map(function (s) {
+    const n = N(), err = C.ui.errors.recs;
+    const cards = n.sucursales.map(function (s) {
       const rs = n.recepcionistas.filter(function (r) { return r.sucursalId === s.id; });
-      return '<section class="pn-group"><h3 class="pn-group-t">' + C.icon('pin', 16) + e(s.dir) + ' <span class="muted">· ' + e(s.ciudad) + '</span></h3>' +
-        (rs.length ? rs.map(function (r) { return '<div class="pn-line"><span><strong>' + e(r.nombre) + '</strong> · ' + e(r.tel) + '</span>' + C.link('Quitar', 'pnNRemove', 'recepcionistas:' + r.id) + '</div>'; }).join('')
-          : '<p class="pn-warn">' + C.icon('alert', 16) + ' Falta quién recibe aquí. ' + C.link('El contacto principal recibe aquí', 'pnNContactoRec', s.id) + '</p>') + '</section>';
+      return '<article class="card pn-nsuc' + (err && !rs.length ? ' is-missing' : '') + '">' +
+        '<header class="pn-nsuc-head"><div class="pn-nsuc-map">' + C.map({ small: true, pin: s.pin }) + '</div><div class="item-main"><strong>' + e(s.dir) + '</strong><span class="muted">' + e(s.ciudad) + '</span></div>' +
+        '<div class="item-actions">' + C.link('Editar', 'pmOpen', 'suc:' + s.id) + C.link('Quitar', 'pmAskDelete', 'suc:' + s.id) + '</div></header>' +
+        '<div class="pn-nsuc-recs"><p class="eyebrow">Recepcionistas</p>' +
+        (rs.length ? rs.map(function (r) { return '<div class="pn-line"><span><strong>' + e(r.nombre) + '</strong> · ' + e(r.tel) + '</span><span class="item-actions">' + C.link('Editar', 'pmOpen', 'rec:' + r.id) + C.link('Quitar', 'pmAskDelete', 'rec:' + r.id) + '</span></div>'; }).join('')
+          : '<p class="pn-warn">' + C.icon('alert', 16) + ' Falta quién recibe aquí. ' + C.link('El contacto principal recibe aquí', 'pnNContactoRec', s.id) + '</p>') +
+        C.link('+ Agregar recepcionista', 'pmOpen', 'rec:new:' + s.id, 'pn-add-link') + '</div></article>';
     }).join('');
-    const form = adding
-      ? '<section class="card card-pad mt-16 reveal">' + recFields(n) + (sin.length === 0 ? '<div class="form-actions">' + C.btn('Cancelar', { action: 'pnNHideRec' }) + C.btn('Agregar recepcionista', { primary: true, action: 'pnNAddRec' }) + '</div>' : '') + '</section>'
-      : '<button type="button" class="btn btn-dashed mt-16" data-action="pnNShowRec">+ Agregar otro recepcionista</button>';
-    return nPage(i, '<h1 class="h1 wz-title">¿Quién recibe en cada sucursal?</h1><div class="field' + C.errCls('recs') + '">' + groups + C.err('recs') + '</div>' + form);
-  };
-  A.pnNShowRec = function () { C.ui.draft = rec0(); C.ui.draft.adding = true; C.set(); };
-  A.pnNHideRec = function () { C.ui.draft = rec0(); C.ui.errors = {}; C.set(); };
-  A.pnNAddRec = function () {
-    const d = C.ui.draft, err = {};
-    if (!d.sucursalId) err['ui.draft.sucursalId'] = 'Elige la sucursal';
-    if (!(d.nombre || '').trim()) err['ui.draft.nombre'] = 'Escribe el nombre';
-    if ((d.tel || '').replace(/\D/g, '').length < 7) err['ui.draft.tel'] = 'Escribe un teléfono válido';
-    if (Object.keys(err).length) return C.fail(err);
-    addRec(); delete C.ui.errors.recs; C.set(); C.toast('Recepcionista agregado');
+    return nPage(i, '<h1 class="h1 wz-title">Sucursales y recepcionistas</h1><p class="lead mb-12">Cada sucursal necesita al menos una persona que reciba los pedidos.</p>' +
+      '<div class="field' + C.errCls('sucs') + C.errCls('recs') + '">' + C.err('sucs') + C.err('recs') + '</div>' +
+      '<div class="stack">' + cards + '</div>' +
+      '<button type="button" class="btn btn-dashed mt-16" data-action="pmOpen" data-arg="suc:new">+ Agregar ' + (n.sucursales.length ? 'otra ' : '') + 'sucursal</button>');
   };
   A.pnNContactoRec = function (el) {
     const c = N().contacto;
     N().recepcionistas.push({ id: C.uid('r'), nombre: (c.nombre + ' ' + c.apellido).trim(), tel: c.wa.replace('+591 ', ''), sucursalId: el.dataset.arg });
-    delete C.ui.errors.recs; C.ui.draft = rec0(); C.set();
+    delete C.ui.errors.recs; C.set();
   };
-  NVAL.recepcionistas = function () {
-    const d = C.ui.draft, err = {};
-    const filled = (d.nombre || '').trim() && (d.tel || '').replace(/\D/g, '').length >= 7 && d.sucursalId;
-    if (filled) addRec();                                            // lo escrito se guarda solo al pulsar Siguiente
-    const sin = sinRecep();
-    if (sin.length) {
-      err.recs = 'Falta quién recibe en: ' + sin.map(function (s) { return s.dir; }).join(', ');
-      if (!(d.nombre || '').trim()) err['ui.draft.nombre'] = 'Escribe el nombre';
-      if ((d.tel || '').replace(/\D/g, '').length < 7) err['ui.draft.tel'] = 'Escribe un teléfono válido';
-    }
-    return err;
+  NVAL.sucursales = function () {
+    const n = N();
+    if (!n.sucursales.length) return { sucs: 'Agrega al menos una sucursal' };
+    const sin = n.sucursales.filter(function (s) { return !n.recepcionistas.some(function (r) { return r.sucursalId === s.id; }); });
+    return sin.length ? { recs: 'Falta quién recibe en: ' + sin.map(function (s) { return s.dir; }).join(', ') } : {};
   };
 
   NV.credito = function (i) {
-    const cr = N().credito, c = N().contacto, fj = N().fj;
-    const opts = '<div class="choice-grid cols-2">' +
-      C.choice({ label: 'Sin crédito', sub: 'Paga con QR o contraentrega.', selected: cr.con === 'no', action: 'pnNCred', arg: 'no' }) +
-      C.choice({ label: 'Con Crédito Cooltiva', sub: 'Armas el contrato con sus condiciones.', selected: cr.con === 'si', action: 'pnNCred', arg: 'si' }) + '</div>';
-    let body = '';
-    if (cr.con === 'si') {
-      body = '<div class="pn-credit mt-24 reveal"><div class="stack"><section class="card card-pad"><h2 class="h3">Condiciones</h2><div class="form-grid mt-16">' +
-        C.field({ label: 'Línea aprobada (Bs)', bind: 'panel.nueva.credito.linea', numeric: true, live: 'pnContrato', placeholder: 'Ej. 10000' }) +
-        C.selectField({ label: 'Plazo de pago', bind: 'panel.nueva.credito.plazo', rerender: true, options: [15, 30, 45, 60].map(function (p) { return { value: String(p), label: p + ' días' }; }) }) + '</div></section>' +
-        '<section class="card card-pad"><h2 class="h3">Documentos</h2><div class="docs pn-docs-up">' +
-        C.CREDITO_DOCS.map(function (doc) { return C.uploadSlot({ path: 'panel.nueva.credito.docs.' + doc.key, label: doc.label, hint: doc.hint, multiple: doc.multiple, max: doc.max, cta: doc.cta, sub: doc.sub }); }).join('') +
-        C.uploadSlot({ path: 'panel.nueva.credito.docs.anverso', label: 'Carnet · anverso', cta: 'Anverso', sub: 'Subir foto', accept: 'image/*,.pdf' }) +
-        C.uploadSlot({ path: 'panel.nueva.credito.docs.reverso', label: 'Carnet · reverso', cta: 'Reverso', sub: 'Subir foto', accept: 'image/*,.pdf' }) + '</div></section></div>' +
-        '<section class="card card-pad pn-contract"><h2 class="h3">Vista previa del contrato</h2><div class="contract-body contract-body-sm" id="pn-contrato">' + C.contratoPanel({ tipo: fj.tipo, ci: fj.ci, razon: fj.razon, nit: fj.nit, empresa: c.empresa, linea: cr.linea, plazo: cr.plazo }) + '</div></section></div>';
-    }
-    return nPage(i, '<div class="row wz-title-row"><h1 class="h1">Crédito y contrato</h1><span class="tag">Opcional</span></div>' + opts + body);
+    const cr = N().credito, c = N().contacto;
+    return nPage(i, '<div class="row wz-title-row"><h1 class="h1">Crédito Cooltiva</h1><span class="tag">Opcional</span></div>' +
+      '<p class="lead mb-12">El crédito lo solicita el cliente desde su celular, porque firma electrónicamente. Tú solo puedes pedírselo.</p>' +
+      '<div class="choice-grid cols-2">' +
+      C.choice({ label: 'Sin crédito por ahora', sub: 'Paga con QR o contraentrega.', selected: !cr.invitar, action: 'pnNCred', arg: 'no' }) +
+      C.choice({ label: 'Pedirle que solicite crédito', sub: 'Le llega un enlace por correo y WhatsApp' + (c.email ? ' (' + e(c.email) + ')' : '') + ' para subir sus documentos y firmar.', selected: !!cr.invitar, action: 'pnNCred', arg: 'si' }) + '</div>');
   };
-  C.live.pnContrato = function () {
-    const el = document.getElementById('pn-contrato'), n = N();
-    if (el) el.innerHTML = C.contratoPanel({ tipo: n.fj.tipo, ci: n.fj.ci, razon: n.fj.razon, nit: n.fj.nit, empresa: n.contacto.empresa, linea: n.credito.linea, plazo: n.credito.plazo });
-  };
-  A.pnNCred = function (el) { C.set(function (S) { S.panel.nueva.credito.con = el.dataset.arg; C.ui.errors = {}; }); };
-  NVAL.credito = function () {
-    const cr = N().credito, err = {};
-    if (cr.con === 'si') {
-      if (!(Number(cr.linea) > 0)) err['panel.nueva.credito.linea'] = 'Escribe la línea aprobada';
-      C.DOC_KEYS.forEach(function (k) { if (!cr.docs[k].length) err['panel.nueva.credito.docs.' + k] = 'Falta este documento'; });
-    }
-    return err;
-  };
+  A.pnNCred = function (el) { C.set(function (S) { S.panel.nueva.credito.invitar = el.dataset.arg === 'si'; }); };
+  NVAL.credito = function () { return {}; };
 
-  function nuevaEmpresa() {
-    const n = N(), id = C.uid('emp'), now = C.nowISO();
-    return {
-      id: id, estado: 'pendiente_alta', origen: 'vendedor', creadoPor: C.persona().nombre, creado: now, actualizado: now,
-      empresa: n.contacto.empresa.trim(),
-      user: { nombre: n.contacto.nombre.trim(), apellido: n.contacto.apellido.trim(), rol: n.contacto.rol, email: n.contacto.email.trim(), wa: n.contacto.wa.trim() },
-      formaJuridica: C.clone(n.fj), sucursales: C.clone(n.sucursales), recepcionistas: C.clone(n.recepcionistas), empleados: [],
-      credito: n.credito.con === 'si' ? { estado: 'aprobado', linea: Number(n.credito.linea), plazo: Number(n.credito.plazo), usado: 0, docs: C.clone(n.credito.docs) } : { estado: 'no', linea: 0, plazo: 30, usado: 0, docs: C.emptyDocs() },
-      pedidos: [], nextPedido: 6001
-    };
-  }
   NV.revisar = function (i) {
-    const n = N(), preview = nuevaEmpresa();
-    if (!n.revisor || n.revisor === P().persona) n.revisor = defaultApprover();
+    const n = N();
     const edit = function (step) { return C.link('Editar', 'pnNTab', NUEVA_STEPS.indexOf(step)); };
-    const sections = [['contacto', 'Contacto'], ['legal', 'Forma jurídica'], ['sucursales', 'Sucursales'], ['recepcionistas', 'Recepcionistas'], ['credito', 'Crédito']].map(function (s) {
-      let body = '';
-      if (s[0] === 'contacto') body = '<strong>' + e(preview.empresa) + '</strong><br>' + e(fullName(preview.user)) + ' · ' + e(preview.user.rol) + '<br><span class="muted">' + e(preview.user.email) + ' · ' + e(preview.user.wa) + '</span>';
-      if (s[0] === 'legal') body = preview.formaJuridica.tipo === 'natural' ? 'Persona natural · CI ' + e(preview.formaJuridica.ci) : e(preview.formaJuridica.razon) + ' · NIT ' + e(preview.formaJuridica.nit);
-      if (s[0] === 'sucursales') body = preview.sucursales.map(function (x) { return e(x.dir) + ' · ' + e(x.ciudad); }).join('<br>');
-      if (s[0] === 'recepcionistas') body = preview.recepcionistas.map(function (r) { return '<strong>' + e(r.nombre) + '</strong> · ' + e(r.tel); }).join('<br>');
-      if (s[0] === 'credito') body = preview.credito.estado === 'aprobado' ? C.bs(preview.credito.linea) + ' · ' + preview.credito.plazo + ' días · contrato listo' : 'Sin crédito';
-      return '<section class="card card-pad sum-card"><div class="row-between"><h2 class="h3">' + s[1] + '</h2>' + edit(s[0]) + '</div><div class="pn-sum-body">' + body + '</div></section>';
-    }).join('');
-    const html = '<h1 class="h1 wz-title">Revisa y envía</h1><div class="stack">' + sections + '</div>' +
-      '<section class="card card-strong card-pad mt-24"><div class="stack">' + approverField('panel.nueva.revisor') +
-      C.field({ label: 'Nota (opcional)', bind: 'panel.nueva.nota', placeholder: 'Ej. Cliente captado en visita' }) +
-      C.checkbox({ bind: 'panel.nueva.notificar', label: 'Avisar al cliente por correo y WhatsApp cuando se apruebe' }) + '</div></section>';
-    return nPage(i, html, C.btn('Enviar a aprobación', { primary: true, action: 'pnNSubmit' }));
+    const c = n.contacto, fj = n.fj;
+    const sections = [
+      ['contacto', 'Contacto', '<strong>' + e(c.empresa) + '</strong><br>' + e((c.nombre + ' ' + c.apellido).trim()) + ' · ' + e(c.rol) + '<br><span class="muted">' + e(c.email) + ' · ' + e(c.wa) + '</span>'],
+      ['legal', 'Forma jurídica', fj.tipo === 'natural' ? 'Persona natural · CI ' + e(fj.ci) : e(fj.razon) + ' · NIT ' + e(fj.nit)],
+      ['sucursales', 'Sucursales y recepcionistas', n.sucursales.map(function (s) { return '<strong>' + e(s.dir) + '</strong> · ' + e(s.ciudad) + '<br><span class="muted">Recibe: ' + e(n.recepcionistas.filter(function (r) { return r.sucursalId === s.id; }).map(function (r) { return r.nombre; }).join(', ')) + '</span>'; }).join('<br>')],
+      ['credito', 'Crédito', n.credito.invitar ? 'Le pediremos que solicite crédito (correo y WhatsApp)' : 'Sin crédito por ahora']
+    ].map(function (s) { return '<section class="card card-pad sum-card"><div class="row-between"><h2 class="h3">' + s[1] + '</h2>' + edit(s[0]) + '</div><div class="pn-sum-body">' + s[2] + '</div></section>'; }).join('');
+    const html = '<h1 class="h1 wz-title">Revisa y crea la cuenta</h1><div class="stack">' + sections + '</div>' +
+      '<section class="card card-strong card-pad mt-24">' + C.checkbox({ bind: 'panel.nueva.enviarAcceso', label: 'Enviar el acceso al cliente por correo y WhatsApp' }) +
+      '<p class="hint mt-8">La cuenta queda activa al crearla. Avisamos a ' + e(avisados()) + '; pueden revisarla en el registro.</p></section>';
+    return nPage(i, html, C.btn('Crear cuenta', { primary: true, action: 'pnNSubmit' }));
   };
   A.pnNSubmit = function () {
-    const n = N();
-    if (!n.revisor) return C.fail({ revisor: 'Elige quién aprueba' });
-    const emp = nuevaEmpresa();
-    C.S.empresas[emp.id] = emp;
-    const req = { id: P().nextReq++, tipo: 'alta', empresaId: emp.id, empresaNombre: emp.empresa, autor: P().persona, revisor: n.revisor, estado: 'pendiente', fecha: emp.creado, notificar: !!n.notificar, nota: (n.nota || '').trim(), ops: [] };
-    P().requests.unshift(req);
-    log('envio', emp.id, 'Envió el alta de la cuenta a aprobación de ' + C.persona(n.revisor).nombre, req.id);
+    const n = N(), id = C.uid('emp'), now = C.nowISO(), c = n.contacto;
+    const emp = {
+      id: id, estado: 'activa', origen: 'vendedor', creadoPor: C.persona().nombre, creado: now, actualizado: now,
+      empresa: c.empresa.trim(),
+      user: { nombre: c.nombre.trim(), apellido: c.apellido.trim(), rol: c.rol, email: c.email.trim(), wa: c.wa.trim() },
+      formaJuridica: C.clone(n.fj), sucursales: C.clone(n.sucursales), recepcionistas: C.clone(n.recepcionistas), empleados: [],
+      credito: Object.assign({ estado: 'no', linea: 0, plazo: 30, usado: 0, docs: C.emptyDocs() }, n.credito.invitar ? { invitado: { fecha: now, por: C.persona().nombre } } : {}),
+      pedidos: [], nextPedido: 6001
+    };
+    C.S.empresas[id] = emp;
+    const partes = ['Creó la cuenta'];
+    if (n.enviarAcceso) partes.push('envió el acceso al cliente por correo y WhatsApp');
+    if (n.credito.invitar) partes.push('le pidió que solicite crédito');
+    addLog({ accion: 'alta', empresaId: id, texto: joinY(partes) });
     P().nueva = C.emptyNueva();
     C.save();
-    C.go('/panel/solicitud/' + req.id + '?enviada=1');
+    C.goWith('/panel/empresa/' + id + '/usuarios', { flash: 'Cuenta creada' + (n.enviarAcceso ? '. Enviamos el acceso a ' + emp.user.email + ' y al WhatsApp ' + emp.user.wa : '') + '. Avisamos a ' + avisados() + '.' });
   };
 
   /* ======================= MODO VENDEDOR (comprar por el cliente) ======================= */
   A.pnActAs = function (el) {
     const id = el.dataset.arg, emp = C.empresa(id);
-    if (!emp || emp.estado !== 'activa') { C.toast('La cuenta debe estar activa'); return; }
+    if (!emp || emp.estado !== 'activa') { C.toast('La cuenta no está activa'); return; }
     C.S.acting = { empresaId: id, seller: C.persona().nombre, back: '#/panel/empresa/' + id + '/pedidos', prevActive: C.S.activeEmpresa, prevLogged: C.S.session.loggedIn, prevCart: C.S.cart };
     C.S.activeEmpresa = id; C.S.session.loggedIn = true; C.S.cart = C.emptyCart();
     C.save(); C.go('/cuenta/tienda');

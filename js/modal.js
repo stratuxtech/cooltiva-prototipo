@@ -9,7 +9,7 @@
     { id: 'sucursales', label: 'Sucursales' },
     { id: 'recepcionistas', label: 'Recepcionistas' },
     { id: 'credito', label: 'Crédito' },
-    { id: 'empleados', label: 'Empleados' },
+    { id: 'empleados', label: 'Responsables' },
     { id: 'configuracion', label: 'Configuración' }
   ];
 
@@ -137,15 +137,17 @@
       };
     }
     if (m.section === 'credito') {
+      const st = C.S.account.credito.estado;
+      const canReq = st !== 'aprobado' && st !== 'solicitado' && !C.S.acting;
       return {
-        title: 'Crédito Cooltiva',
-        body: C.creditoContent(),
-        right: fromPago ? C.btn('Volver al pago', { primary: true, action: 'closeModal' }) : close
+        title: canReq ? 'Solicitar Crédito Cooltiva' : 'Crédito Cooltiva',
+        body: C.creditoContent({ inModal: true }),
+        right: canReq ? C.btn('Cancelar', { action: 'closeModal' }) + C.btn('Enviar solicitud', { primary: true, action: 'credSubmit' })
+          : (fromPago ? C.btn('Volver al pago', { primary: true, action: 'closeModal' }) : close)
       };
     }
     if (m.section === 'empleados') {
-      // En el modal los empleados no se editan: se invita y se consulta la lista
-      return { title: C.ui.invited ? 'Invitación enviada' : 'Agregar empleado', body: C.empleadosContent({ noEdit: true }), right: close };
+      return { title: C.ui.invited ? 'Invitación enviada' : 'Agregar responsable', body: C.empleadosContent(), right: close };
     }
     return { title: 'Configuración', body: C.pending('Configuración'), right: close };
   }

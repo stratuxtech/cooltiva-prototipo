@@ -2,7 +2,7 @@
    NÚCLEO: estado, persistencia, router, acciones y render
    ========================================================= */
 (function () {
-  const STORE_KEY = 'cooltiva-proto-v3';
+  const STORE_KEY = 'cooltiva-proto-v4';
 
   /* ---------- Estado persistente (dominio + progreso de flujos) ----------
      empresas: todas las cuentas de clientes (las ve el panel de vendedores)
@@ -27,7 +27,7 @@
       cart: C.emptyCart(),
       demo: { rol: '' },
       lastOrderId: null,
-      panel: C.seedPanel(empresas)
+      panel: C.seedPanel()
     });
   };
 
@@ -195,11 +195,13 @@
 
   C.renderOverlays = function () {
     document.getElementById('sheet-root').innerHTML = C.renderSheet ? C.renderSheet() : '';
-    document.getElementById('modal-root').innerHTML = C.ui.modal ? C.renderModal() : '';
+    document.getElementById('modal-root').innerHTML = C.ui.modal ? C.renderModal() : (C.ui.pnModal && C.renderPnModal ? C.renderPnModal() : '');
     document.getElementById('dialog-root').innerHTML = C.ui.dialog ? C.renderDialog() : '';
     document.getElementById('demo-root').innerHTML = C.renderDemo ? C.renderDemo() : '';
-    document.body.classList.toggle('no-scroll', !!(C.ui.modal || C.ui.dialog || C.ui.drawer || C.ui.sheet || (C.ui.demoOpen && C.isMobile())));
+    document.body.classList.toggle('no-scroll', !!(C.ui.modal || C.ui.pnModal || C.ui.dialog || C.ui.drawer || C.ui.sheet || (C.ui.demoOpen && C.isMobile())));
     if (C.ui.modal && C.mountModal) C.mountModal();
+    if (C.ui.pnModal && C.mountPnModal) C.mountPnModal();
+    if (C.mountCredPad) C.mountCredPad();
   };
 
   C.afterRender = function () {
@@ -285,6 +287,7 @@
     if (ev.key === 'Escape') {
       if (C.ui.dialog) { C.ui.dialog = null; C.renderOverlays(); return; }
       if (C.ui.modal) { C.actions.closeModal(); return; }
+      if (C.ui.pnModal) { C.ui.pnModal = null; C.ui.errors = {}; C.renderOverlays(); return; }
       if (C.ui.sheet) { C.ui.sheet = false; C.renderOverlays(); return; }
       if (C.ui.drawer) { C.ui.drawer = false; C.render(); return; }
       if (C.ui.demoOpen) { C.ui.demoOpen = false; C.renderOverlays(); return; }

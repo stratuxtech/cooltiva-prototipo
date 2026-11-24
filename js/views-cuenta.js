@@ -1,6 +1,6 @@
 /* =========================================================
    MI CUENTA · Tienda, Pedidos, Sucursales, Recepcionistas,
-   Crédito, Agregar empleado, Configuración (+ páginas externas)
+   Crédito, Agregar responsable, Configuración (+ páginas externas)
    ========================================================= */
 (function () {
   const e = C.esc;
@@ -308,59 +308,123 @@
     C.toast('Recepcionista eliminado');
   };
 
-  /* ===================== CRÉDITO ===================== */
-  C.creditoContent = function () {
-    const st = C.S.account.credito.estado;
+  /* ===================== CRÉDITO =====================
+     Sin crédito: el cliente lo solicita él mismo (documentos + firma
+     electrónica desde su dispositivo). El vendedor no puede hacerlo. */
+  C.creditoContent = function (opts) {
+    opts = opts || {};
+    const c = C.S.account.credito, st = c.estado;
     if (st === 'aprobado') return C.creditoAprobado();
-    return C.pending(st === 'solicitado' ? 'Solicitud de crédito enviada' : 'Crédito Cooltiva',
-      st === 'solicitado'
-        ? 'El estado de una solicitud en revisión aún no está definido en la arquitectura de información.'
-        : 'El contenido del tab Crédito cuando no hay crédito aprobado (incluida la solicitud desde Mi Cuenta) aún no está definido en la arquitectura de información.');
+    if (st === 'solicitado') {
+      return '<div class="credit-ok"><div class="success-icon">' + C.icon('clock', 30) + '</div><h2 class="h2">Solicitud enviada</h2>' +
+        '<p class="muted">Recibimos tus documentos y tu firma' + (c.solicitado ? ' el ' + C.fmtCreated(c.solicitado) : '') + '. Te avisaremos por correo y WhatsApp cuando tu crédito esté aprobado.</p></div>' +
+        '<ul class="pn-docs cred-docs">' + C.DOC_KEYS.map(function (k) {
+          const f = (c.docs && c.docs[k]) || [];
+          return '<li class="' + (f.length ? 'is-ok' : 'is-missing') + '"><span class="pn-doc-mark" aria-hidden="true">' + C.icon(f.length ? 'check' : 'x', 13) + '</span><span><strong>' + C.DOC_LABELS[k] + '</strong></span></li>';
+        }).join('') + '</ul>';
+    }
+    if (C.S.acting) return '<p class="muted">El cliente debe solicitar el crédito desde su celular, porque firma electrónicamente. Desde el panel puedes pedírselo.</p>';
+    const info = C.CREDITO_INFO.map(function (x) {
+      return '<div class="card card-pad info-card"><span class="info-ico" aria-hidden="true"></span><h3 class="h3">' + e(x.title) + '</h3><p class="muted small">' + e(x.text) + '</p></div>';
+    }).join('');
+    const drawHint = C.isMobile() ? 'Dibuja tu firma con el dedo' : 'Dibuja tu firma con el mouse';
+    return '<div class="cred-req">' + (opts.inModal ? '' : '<p class="lead">Solicítalo una sola vez: sube tus documentos y firma desde este dispositivo.</p>') +
+      '<div class="info-grid mt-16">' + info + '</div>' +
+      '<h3 class="h3 mt-24">Documentos</h3><div class="docs cred-docs-up">' +
+      C.CREDITO_DOCS.map(function (d) { return C.uploadSlot({ path: 'ui.draft.cdocs.' + d.key, label: d.label, hint: d.hint, multiple: d.multiple, max: d.max, cta: d.cta, sub: d.sub }); }).join('') +
+      '<div class="docs-full"><p class="upload-label">Carnet del representante legal</p><p class="hint">Cédula de Identidad, ambas caras</p><div class="docs-pair">' +
+      C.uploadSlot({ path: 'ui.draft.cdocs.anverso', cta: 'Anverso', sub: 'Subir foto', accept: 'image/*,.pdf' }) +
+      C.uploadSlot({ path: 'ui.draft.cdocs.reverso', cta: 'Reverso', sub: 'Subir foto', accept: 'image/*,.pdf' }) + '</div></div></div>' +
+      '<div class="field mt-24' + C.errCls('cfirma') + '"><span class="label">Firma electrónica</span><p class="hint">' + drawHint + '.</p>' +
+      '<div class="sign-pad focus-target" id="cred-pad" tabindex="-1"><canvas id="cred-canvas" aria-label="Área de firma"></canvas><span class="sign-line" aria-hidden="true"></span>' +
+      (C.ui.draft.cfirma ? '' : '<span class="sign-hint" id="cred-hint">Firma aquí</span>') + '</div>' +
+      '<div class="sign-tools">' + C.link('Borrar firma', 'credFirmaClear') + '</div>' + C.err('cfirma') + '</div>' +
+      '<div class="mt-16">' + C.checkbox({ bind: 'ui.draft.cautoriza', err: 'cautoriza', label: 'Autorizo a Cooltiva a revisar mis documentos para evaluar mi crédito' }) + '</div>' +
+      (opts.inModal ? '' : '<div class="form-actions">' + C.btn('Enviar solicitud', { primary: true, action: 'credSubmit' }) + '</div>') + '</div>';
+  };
+  /* Pad de firma de la solicitud de crédito (dedo o mouse) */
+  C.mountCredPad = function () {
+    const canvas = document.getElementById('cred-canvas');
+    if (!canvas || canvas.dataset.mounted) return;
+    canvas.dataset.mounted = '1';
+    const pad = canvas.parentElement, dpr = window.devicePixelRatio || 1, w = pad.clientWidth, h = pad.clientHeight;
+    canvas.width = w * dpr; canvas.height = h * dpr; canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+    const ctx = canvas.getContext('2d'); ctx.scale(dpr, dpr);
+    ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#000';
+    if (C.ui.draft.cfirma) { const img = new Image(); img.onload = function () { ctx.drawImage(img, 0, 0, w, h); }; img.src = C.ui.draft.cfirma; }
+    let drawing = false, last = null;
+    const pos = function (ev) { const r = canvas.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; };
+    canvas.addEventListener('pointerdown', function (ev) {
+      drawing = true; last = pos(ev); try { canvas.setPointerCapture(ev.pointerId); } catch (x) {}
+      const hint = document.getElementById('cred-hint'); if (hint) hint.remove();
+      ctx.beginPath(); ctx.arc(last.x, last.y, 1, 0, Math.PI * 2); ctx.fill();
+    });
+    canvas.addEventListener('pointermove', function (ev) {
+      if (!drawing) return;
+      const p = pos(ev); ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p;
+    });
+    const end = function () {
+      if (!drawing) return; drawing = false;
+      C.ui.draft.cfirma = canvas.toDataURL('image/png');
+      if (C.ui.errors.cfirma) { delete C.ui.errors.cfirma; const wrap = pad.closest('.has-error'); if (wrap) { wrap.classList.remove('has-error'); const m = wrap.querySelector(':scope > .field-error'); if (m) m.remove(); } }
+    };
+    canvas.addEventListener('pointerup', end); canvas.addEventListener('pointercancel', end);
+  };
+  A.credFirmaClear = function () { C.ui.draft.cfirma = null; C.set(); };
+  A.credSubmit = function () {
+    const d = C.ui.draft, docs = d.cdocs || {}, err = {};
+    C.DOC_KEYS.forEach(function (k) { if (!(docs[k] || []).length) err['ui.draft.cdocs.' + k] = k === 'anverso' || k === 'reverso' ? 'Sube la foto del ' + k : 'Sube este documento'; });
+    if (!d.cfirma) err.cfirma = 'Firma en el recuadro';
+    if (!d.cautoriza) err.cautoriza = 'Necesitamos tu autorización para revisar los documentos';
+    if (Object.keys(err).length) return C.fail(err);
+    const now = C.isoDate(C.DEMO_TODAY) + 'T' + new Date().toTimeString().slice(0, 5);
+    const a = C.S.account;
+    a.credito = { estado: 'solicitado', linea: 0, plazo: 30, usado: 0, docs: C.clone(Object.assign(C.emptyDocs(), docs)), solicitado: now };
+    C.S.panel.log.unshift({ id: C.uid('l'), fecha: now, actor: 'cliente', accion: 'credito', empresaId: a.id, texto: 'El cliente solicitó Crédito Cooltiva desde su dispositivo, con firma electrónica' });
+    C.ui.draft = {}; C.ui.errors = {};
+    C.set();
+    C.toast('Solicitud enviada · te avisaremos cuando esté aprobada');
   };
   C.route('/cuenta/credito', function () {
     const g = guard(); if (g) return g;
     const st = C.S.account.credito.estado;
-    return page('credito', head('Crédito') + '<div class="' + (st === 'aprobado' ? 'card card-pad' : '') + '">' + C.creditoContent() + '</div>', { title: 'Crédito' });
+    const title = st === 'aprobado' || st === 'solicitado' ? 'Crédito' : 'Solicitar Crédito Cooltiva';
+    return page('credito', head(title) + '<div class="' + (st === 'aprobado' || st === 'solicitado' ? 'card card-pad' : '') + '">' + C.creditoContent() + '</div>', { title: 'Crédito' });
   });
 
-  /* ===================== EMPLEADOS ===================== */
+  /* ===================== RESPONSABLES =====================
+     Se invita con correo y WhatsApp; no se editan, solo se eliminan. */
   function empValid(d) { return /^\S+@\S+\.\S+$/.test(d.email || '') && (d.wa || '').replace(/\D/g, '').length >= 8; }
   C.live.empForm = function () {
     const b = document.getElementById('emp-send');
     if (b) b.disabled = !empValid(C.ui.draft);
   };
-  C.empleadosContent = function (opts) {
-    opts = opts || {};
+  C.empleadosContent = function () {
     const ui = C.ui, list = C.S.account.empleados;
     if (ui.invited) {
       return C.success('Invitación enviada',
         'Enviamos la invitación a <strong>' + e(ui.invited.email) + '</strong><br>y al WhatsApp <strong>' + e(ui.invited.wa) + '</strong>.',
-        C.btn('Invitar a otra persona', { action: 'empAnother' }) + C.btn('Ver empleados', { primary: true, action: 'empSeeList' }));
+        C.btn('Invitar a otra persona', { action: 'empAnother' }) + C.btn('Ver responsables', { primary: true, action: 'empSeeList' }));
     }
-    const d = ui.draft;
     let html = '<section class="card card-pad"><div class="form-grid">' +
       C.field({ label: 'Correo electrónico', bind: 'ui.draft.email', type: 'email', live: 'empForm', placeholder: 'nombre@restaurante.bo', autocomplete: 'off' }) +
       C.field({ label: 'WhatsApp', bind: 'ui.draft.wa', type: 'tel', live: 'empForm', placeholder: '+591 7000 0000', autocomplete: 'off' }) +
-      '</div><div class="form-actions">' + C.btn('Enviar invitación', { primary: true, action: 'empSend', id: 'emp-send', disabled: !empValid(d) }) + '</div></section>' +
-      '<h2 class="h3 mt-32" id="emp-list">Empleados</h2>';
+      '</div><div class="form-actions">' + C.btn('Enviar invitación', { primary: true, action: 'empSend', id: 'emp-send', disabled: !empValid(ui.draft) }) + '</div></section>' +
+      '<h2 class="h3 mt-32" id="emp-list">Responsables</h2>';
     if (!list.length) html += '<p class="muted mt-8">Todavía no invitaste a nadie.</p>';
     html += '<div class="item-list mt-16">' + list.map(function (m) {
-      if (!opts.noEdit && ui.editing && ui.editing.type === 'emp' && ui.editing.id === m.id) {
-        return '<section class="card card-strong card-pad form-card"><div class="form-grid">' +
-          C.field({ label: 'Correo electrónico', bind: 'ui.draft.editEmail', type: 'email' }) +
-          C.field({ label: 'WhatsApp', bind: 'ui.draft.editWa', type: 'tel' }) + '</div>' +
-          '<div class="form-actions">' + C.btn('Cancelar', { action: 'empCancel' }) + C.btn('Guardar cambios', { primary: true, action: 'empSave', arg: m.id }) + '</div></section>';
-      }
-      return '<article class="card item-card"><div class="item-main"><strong>' + e(m.email) + '</strong><span class="muted">WhatsApp ' + e(m.wa) + '</span></div>' +
-        '<div class="item-actions">' + (opts.noEdit ? '' : C.link('Editar', 'empEdit', m.id)) + C.link('Eliminar', 'empDelete', m.id) + '</div></article>';
+      const nombre = ((m.nombre || '') + ' ' + (m.apellido || '')).trim();
+      return '<article class="card item-card"><div class="item-main"><strong>' + e(nombre || m.email) + '</strong>' + (nombre ? '<span class="muted">' + e(m.email) + '</span>' : '') + '<span class="muted">WhatsApp ' + e(m.wa) + '</span></div>' +
+        '<div class="item-actions">' + C.link('Eliminar', 'empDelete', m.id) + '</div></article>';
     }).join('') + '</div>';
     return html;
   };
-  C.route('/cuenta/empleados', function () {
+  C.route('/cuenta/responsables', function () {
     const g = guard(); if (g) return g;
-    const html = (C.ui.invited ? '' : head('Agregar empleado', '', 'Le enviaremos una invitación para crear su cuenta.')) + C.empleadosContent();
-    return page('empleados', html, { title: 'Agregar empleado' });
+    const html = (C.ui.invited ? '' : head('Agregar responsable', '', 'Le enviaremos una invitación para entrar a la cuenta de tu empresa.')) + C.empleadosContent();
+    return page('responsables', html, { title: 'Agregar responsable' });
   });
+  C.route('/cuenta/empleados', function () { return { redirect: '/cuenta/responsables' }; });
   A.empSend = function () {
     const d = C.ui.draft;
     if (!empValid(d)) return C.fail({ 'ui.draft.email': 'Revisa el correo y el WhatsApp' });
@@ -378,38 +442,20 @@
     C.ui.invited = null; C.set();
     const l = document.getElementById('emp-list'); if (l) l.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
-  A.empEdit = function (el) {
-    const m = C.S.account.empleados.find(function (x) { return x.id === el.dataset.arg; });
-    C.ui.editing = { type: 'emp', id: m.id }; C.ui.errors = {};
-    C.ui.draft = Object.assign({}, C.ui.draft, { editEmail: m.email, editWa: m.wa });
-    C.set();
-  };
-  A.empCancel = function () { C.ui.editing = null; C.ui.errors = {}; C.set(); };
-  A.empSave = function (el) {
-    const d = C.ui.draft, err = {};
-    if (!/^\S+@\S+\.\S+$/.test(d.editEmail || '')) err['ui.draft.editEmail'] = 'Escribe un correo válido';
-    if ((d.editWa || '').replace(/\D/g, '').length < 8) err['ui.draft.editWa'] = 'Escribe un WhatsApp válido';
-    if (Object.keys(err).length) return C.fail(err);
-    const m = C.S.account.empleados.find(function (x) { return x.id === el.dataset.arg; });
-    m.email = d.editEmail.trim(); m.wa = d.editWa.trim();
-    C.ui.editing = null;
-    C.set();
-    C.toast('Cambios guardados');
-  };
   A.empDelete = function (el) {
     const m = C.S.account.empleados.find(function (x) { return x.id === el.dataset.arg; });
     C.ui.dialog = {
-      title: '¿Eliminar este empleado?',
+      title: '¿Eliminar este responsable?',
       body: '<strong>' + e(m.email) + '</strong> perderá el acceso a la cuenta de la empresa.<br>Esta acción no se puede deshacer.',
-      confirm: 'Eliminar empleado', action: 'empDeleteYes', arg: m.id
+      confirm: 'Eliminar responsable', action: 'empDeleteYes', arg: m.id
     };
     C.renderOverlays();
   };
   A.empDeleteYes = function (el) {
     C.S.account.empleados = C.S.account.empleados.filter(function (x) { return x.id !== el.dataset.arg; });
-    C.ui.dialog = null; C.ui.editing = null;
+    C.ui.dialog = null;
     C.set();
-    C.toast('Empleado eliminado');
+    C.toast('Responsable eliminado');
   };
 
   /* ===================== CONFIGURACIÓN ===================== */

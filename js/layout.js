@@ -65,7 +65,7 @@
     { id: 'sucursales', label: 'Sucursales' },
     { id: 'recepcionistas', label: 'Recepcionistas' },
     { id: 'credito', label: 'Crédito' },
-    { id: 'empleados', label: 'Agregar empleado' },
+    { id: 'responsables', label: 'Agregar responsable' },
     { id: 'configuracion', label: 'Configuración' }
   ];
 

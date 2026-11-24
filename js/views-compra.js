@@ -458,7 +458,7 @@
     const cart = C.S.cart, cred = C.S.account.credito;
     const aprobado = cred.estado === 'aprobado';
     const opts = '<div class="choice-grid cols-3 pay-opts focus-target" role="radiogroup" tabindex="-1">' +
-      C.choice({ label: 'Crédito Cooltiva', selected: cart.pago === 'credito', action: 'pickPago', arg: 'credito', disabled: !aprobado, sub: C.link('Ver crédito', 'openModal', 'credito') }) +
+      C.choice({ label: 'Crédito Cooltiva', selected: cart.pago === 'credito', action: 'pickPago', arg: 'credito', disabled: !aprobado, sub: aprobado ? C.link('Ver crédito', 'openModal', 'credito') : (cred.estado === 'solicitado' ? 'Solicitud en revisión' : C.link('Solicitar crédito', 'openModal', 'credito')) }) +
       C.choice({ label: 'Pago con QR', selected: cart.pago === 'qr', action: 'pickPago', arg: 'qr' }) +
       C.choice({ label: 'Contraentrega', selected: cart.pago === 'contraentrega', action: 'pickPago', arg: 'contraentrega' }) + '</div>';
     let panel = '';
@@ -472,7 +472,6 @@
     }
     const html = '<h1 class="h1 wz-title">¿Cómo quieres pagar?</h1>' +
       '<div class="field' + C.errCls('pago') + '">' + opts + C.err('pago') + '</div>' +
-      (!aprobado ? '<p class="hint mt-8">Crédito Cooltiva: el estado sin crédito aprobado está pendiente de definición.</p>' : '') +
       '<div class="mt-24">' + panel + '</div>';
     return stepPage(3, html, { mount: mountSignature });
   });

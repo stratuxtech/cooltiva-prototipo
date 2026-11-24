@@ -15,38 +15,32 @@ Para ver cómo se ve en mobile no hay otro link: en la pestaña **DEMO → Vista
 la misma página se muestra dentro de un teléfono (360 / 390 / 430 px) y mantiene la pantalla en la que estabas.
 "Ver en escritorio" vuelve. También funciona abriéndola en un celular real.
 
-- **Mapa de flujos:** `index.html#/mapa` lista las 45 pantallas del cliente (1a … 7a) y las 17 del panel (8a … 8q).
+- **Mapa de flujos:** `index.html#/mapa` lista las 45 pantallas del cliente (1a … 7a) y las 18 del panel (8a … 8r).
   Tocar una abre ese estado con sus datos de ejemplo y desde ahí el flujo sigue siendo navegable.
 
 ## Panel de vendedores (flujo 8)
 
-Panel administrativo para que los vendedores creen y administren cuentas de clientes. Ruta: `#/panel`.
+Panel interno para que los vendedores creen y administren cuentas de clientes. Ruta: `#/panel`.
 El demo entra con un perfil elegible: Fabiana Paz, Jorge Llorenti o un Supervisor comercial.
-Está pensado para ser **rápido**: poca información por pantalla.
+La especificación completa está en `docs/arquitectura_de_informacion_y_user_flows_cooltiva_sprint_1_v5.md` (sección 8).
 
-- **Empresas:** lista mínima con el nombre de la empresa, su estado ("Alta en aprobación") y sus usuarios.
-  Tocar un usuario abre su información lista para editar; tocar la empresa abre su ficha.
-- **Ficha de empresa:** Usuarios, Datos legales, Sucursales, Recepcionistas, Crédito y contrato, Pedidos e Historial.
-- **Nueva cuenta (wizard de 6 pasos):** Contacto → Forma jurídica → Sucursales → Recepcionistas → Crédito y contrato → Revisar.
-  Un solo contacto por cuenta; los demás usuarios se agregan después, desde la ficha.
-  "Siguiente" guarda lo que está escrito (no hace falta tocar "agregar") y, al haber una sucursal o un recepcionista,
-  el formulario pasa a una tarjeta "+ Agregar". "Guardar y salir" deja el alta en borrador.
-- **Crédito y contrato:** el vendedor arma las condiciones (línea, plazo, 6 documentos) y ve el contrato generado.
-- **Hacer pedido para el cliente:** abre la tienda real en *modo vendedor* (banner negro; solo Tienda y Pedidos).
-  El pedido queda a nombre del vendedor y en el registro.
-- **Registro de cambios** (quién hizo qué, cuándo y en qué cuenta; no se edita) y **Equipo** (alta de vendedores, también con aprobación).
+- **Empresas:** nombre de la empresa y sus usuarios. Tocar un usuario abre su edición.
+- **Ficha:** Usuarios, Datos legales, Sucursales, Recepcionistas, Crédito, Pedidos e Historial.
+  **Todo se edita, siempre en modal**; eliminar pide confirmación.
+- **Confianza con trazabilidad:** guardar aplica el cambio al instante, queda en el **Registro de cambios** con el valor
+  anterior y se avisa al equipo (campana y "Nuevo"). Otro vendedor puede **revertirlo**. No hay aprobaciones previas.
+- **Crédito:** el vendedor no lo crea ni lo edita. Lo ve en modo solo lectura y puede **pedirle al cliente que lo solicite**
+  (correo y WhatsApp), porque la firma tiene que hacerse desde el dispositivo del cliente.
+- **Nueva cuenta (5 pasos):** Contacto → Forma jurídica → Sucursales y recepcionistas → Crédito → Revisar y crear.
+  Siempre se puede agregar otra sucursal u otro recepcionista (en modal). La cuenta queda activa al crearla.
+- **Hacer pedido para el cliente:** tienda real en *modo vendedor* (solo Tienda y Pedidos).
+- **Equipo:** agregar y editar vendedores en modal.
 
-### Control: nadie aplica un cambio solo
+## Comprador: cambios de la ronda 4
 
-1. El vendedor **edita en borrador**: nada se aplica a la cuenta.
-2. **Revisa y envía:** lista simple de cambios (*antes → después*). El aprobador ya viene elegido, el motivo es opcional
-   y se envía con un toque.
-3. Solo **otra persona** puede aprobar: quien envía no ve el botón. Mientras tanto, esos datos quedan **bloqueados**.
-4. **Aprobaciones:** quien aprueba ve qué se cambió y toca **Aprobar** o **Rechazar** (el rechazo pide un motivo breve).
-5. Al aprobar se aplica, queda en el registro y, si se marcó, **se avisa al cliente por correo y WhatsApp** (simulado).
-   Al enviar, también se avisa al aprobador por correo y WhatsApp (simulado). No se envía nada real.
-
-**Quién aprueba queda por definir:** hoy se elige entre los demás vendedores o un "Supervisor comercial".
+- "Agregar empleado" pasa a **Agregar responsable**; los responsables solo se eliminan (no se editan).
+- **Solicitar crédito:** sin crédito, el cliente lo solicita desde Mi Cuenta → Crédito o desde el modal de cuenta:
+  6 documentos, firma electrónica (dedo o mouse) y autorización. En el pago, la opción Crédito muestra "Solicitar crédito".
 
 ## Pestaña DEMO (fija, a la derecha)
 
